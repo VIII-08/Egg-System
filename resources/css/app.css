@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ensure SweetAlert2 appears above modals */
+.swal2-container {
+    z-index: 99999 !important;
+}
