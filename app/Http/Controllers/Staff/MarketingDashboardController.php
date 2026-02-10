@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\EggProduct;
 use App\Models\SalesTransaction;
 use App\Models\Expense;
+use App\Models\Collectible;
 use Illuminate\Support\Facades\Auth;
 
 class MarketingDashboardController extends Controller
@@ -24,6 +25,13 @@ class MarketingDashboardController extends Controller
         // Expenses logged by this specific user today
         $expensesToday = Expense::where('user_id', $userId)->whereDate('expense_date', today())->sum('amount');
         
+        // Total collectibles balance (unpaid/partial) for this user's sales
+        $totalCollectibles = Collectible::whereHas('salesTransaction', function ($query) use ($userId) {
+            $query->where('user_id', $userId);
+        })
+        ->whereIn('status', ['unpaid', 'partial'])
+        ->sum('balance');
+        
         // This user's recent activity (their last 5 sales)
         $recentActivities = SalesTransaction::where('user_id', $userId)->latest()->limit(5)->get();
 
@@ -31,6 +39,7 @@ class MarketingDashboardController extends Controller
             'totalEggInventory' => (int) $totalEggInventory,
             'salesToday' => (float) $salesToday,
             'expensesToday' => (float) $expensesToday,
+            'totalCollectibles' => (float) $totalCollectibles,
             'recentActivities' => $recentActivities,
         ]);
     }

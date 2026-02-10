@@ -33,4 +33,9 @@ class SalesTransaction extends Model
     {
         return $this->hasMany(SaleItem::class);
     }
+
+    public function collectible()
+    {
+        return $this->hasOne(Collectible::class);
+    }
 }

@@ -12,6 +12,9 @@ use App\Models\ProductionLog;
 use App\Models\EggProduct;
 use App\Models\ChickenStockLog;
 use App\Models\FarmStat;
+use App\Models\AuditLog;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\ExpenseReportExport;
@@ -64,7 +67,17 @@ class ReportController extends Controller
          }
 
          $pdf = Pdf::loadView($viewName, $reportData);
-         return $pdf->download(ucwords(str_replace('_', ' ', $filters['report_type'])) . '.pdf');
+         
+         // Log report download
+         $userName = Auth::user() ? Auth::user()->name : 'System';
+         $reportTypeName = ucwords(str_replace('_', ' ', $filters['report_type']));
+         AuditLog::createWithRequest([
+             'user_id' => Auth::id(),
+             'action' => 'report_downloaded',
+             'log_entry' => "`{$userName}` downloaded `{$reportTypeName}` report (PDF) for period `{$filters['start_date']}` to `{$filters['end_date']}`.",
+         ], $request);
+         
+         return $pdf->download($reportTypeName . '.pdf');
     }
 
     public function downloadExcel(Request $request)
@@ -77,16 +90,32 @@ class ReportController extends Controller
 
         $filename = "{$filters['report_type']}-{$filters['start_date']}-to-{$filters['end_date']}.xlsx";
         
+        // Log report download
+        $userName = Auth::user() ? Auth::user()->name : 'System';
+        $reportTypeName = ucwords(str_replace('_', ' ', $filters['report_type']));
+        
+        $result = null;
         switch ($filters['report_type']) {
             case 'expense_summary':
-                return Excel::download(new ExpenseReportExport($filters['start_date'], $filters['end_date']), $filename);
+                $result = Excel::download(new ExpenseReportExport($filters['start_date'], $filters['end_date']), $filename);
+                break;
             case 'sales_summary':
-                return Excel::download(new SalesSummaryExport($filters['start_date'], $filters['end_date']), $filename);
+                $result = Excel::download(new SalesSummaryExport($filters['start_date'], $filters['end_date']), $filename);
+                break;
             case 'inventory_report':
-                return Excel::download(new InventoryReportExport($filters['start_date'], $filters['end_date']), $filename);
+                $result = Excel::download(new InventoryReportExport($filters['start_date'], $filters['end_date']), $filename);
+                break;
             default:
                 return back()->with('error', 'Excel export is not available for this report type.');
         }
+        
+        AuditLog::createWithRequest([
+            'user_id' => Auth::id(),
+            'action' => 'report_downloaded',
+            'log_entry' => "`{$userName}` downloaded `{$reportTypeName}` report (Excel) for period `{$filters['start_date']}` to `{$filters['end_date']}`.",
+        ], $request);
+        
+        return $result;
     }
 
     // This private helper contains ALL the report generation logic
@@ -187,9 +216,9 @@ class ReportController extends Controller
                 break;
 
             case 'sales_summary':
-                // Get egg products in the correct order (excluding DAMAGED and BROKEN EGGS)
+                // Get egg products in the correct order (excluding DAMAGED EGGS)
                 $eggProducts = EggProduct::where('name', '!=', 'DAMAGED')
-                    ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+                    ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
                     ->orderByRaw("CASE 
                         WHEN name = 'SMALL' THEN 1
                         WHEN name = 'MEDIUM' THEN 2
@@ -300,7 +329,7 @@ class ReportController extends Controller
                 $data['monthYear'] = $startDate->format('F, Y');
                 
                 // Debug output
-                \Log::info('Sales Summary Data Prepared', [
+                Log::info('Sales Summary Data Prepared', [
                     'items_count' => count($reportRows),
                     'product_names' => $productNames,
                     'has_prices' => !empty($prices),
@@ -314,20 +343,71 @@ class ReportController extends Controller
                      ->whereBetween('log_date', [$startDate, $endDate])
                      ->get();
                  
-                 // Group by date and product name
+                 // Get all egg products to build dynamic mapping
+                 $allEggProducts = EggProduct::whereRaw('LOWER(name) != ?', ['damaged eggs'])
+                     ->orderByRaw("CASE 
+                         WHEN name = 'SMALL' THEN 1
+                         WHEN name = 'MEDIUM' THEN 2
+                         WHEN name = 'LARGE' THEN 3
+                         WHEN name = 'X-LARGE' THEN 4
+                         WHEN name = 'XL' THEN 4
+                         WHEN name = 'JUMBO' THEN 5
+                         WHEN name = 'PULLETS' THEN 6
+                         ELSE 7
+                     END")
+                     ->get();
+                 
+                 // Get damaged eggs product separately (if exists)
+                 $damagedProduct = EggProduct::whereRaw('LOWER(name) LIKE ?', ['%damage%'])->first();
+                 
+                 // Build dynamic mapping from actual product names
+                 $eggSizeMap = [];
+                 $columnNames = [];
+                 
+                 // Add all regular products first
+                 foreach ($allEggProducts as $product) {
+                     $productNameUpper = strtoupper($product->name);
+                     // Map XL variations to X-LARGE
+                     if (in_array($productNameUpper, ['XL', 'X-LARGE'])) {
+                         $columnName = 'X-LARGE';
+                     } else {
+                         $columnName = $productNameUpper;
+                     }
+                     // Map the product name (uppercase) to its column name
+                     $eggSizeMap[$productNameUpper] = $columnName;
+                     if (!in_array($columnName, $columnNames)) {
+                         $columnNames[] = $columnName;
+                     }
+                 }
+                 
+                 // Add damaged eggs product with its actual name as column name
+                 if ($damagedProduct) {
+                     $damagedNameUpper = strtoupper($damagedProduct->name);
+                     // Use the actual product name as the column name (not hardcoded "DAMAGED")
+                     $columnName = $damagedNameUpper;
+                     $eggSizeMap[$damagedNameUpper] = $columnName;
+                     if (!in_array($columnName, $columnNames)) {
+                         $columnNames[] = $columnName;
+                     }
+                 }
+                 
+                 // Group by date and product name (use actual product name from database)
                  $logsByDate = [];
                  foreach ($productionLogs as $log) {
                      // Normalize date to Y-m-d format
                      $dateKey = Carbon::parse($log->log_date)->format('Y-m-d');
-                     $productName = strtoupper($log->eggProduct->name ?? '');
+                     // Use actual product name from database (not uppercased yet for mapping)
+                     $productName = $log->eggProduct->name ?? '';
+                     $productNameUpper = strtoupper($productName);
                      
                      if (!isset($logsByDate[$dateKey])) {
                          $logsByDate[$dateKey] = [];
                      }
-                     if (!isset($logsByDate[$dateKey][$productName])) {
-                         $logsByDate[$dateKey][$productName] = 0;
+                     // Store both original and uppercase for flexible mapping
+                     if (!isset($logsByDate[$dateKey][$productNameUpper])) {
+                         $logsByDate[$dateKey][$productNameUpper] = 0;
                      }
-                     $logsByDate[$dateKey][$productName] += $log->quantity;
+                     $logsByDate[$dateKey][$productNameUpper] += $log->quantity;
                  }
                  
                  // Get current chicken stock as baseline
@@ -379,30 +459,14 @@ class ReportController extends Controller
                      $stockByDate[$dateKey] = $stockCount;
                  }
                  
-                 // Map product names to column names
-                 $eggSizeMap = [
-                     'PULLETS' => 'PULLETS',
-                     'SMALL' => 'SMALL',
-                     'MEDIUM' => 'MEDIUM',
-                     'LARGE' => 'LARGE',
-                     'X-LARGE' => 'X-LARGE',
-                     'XL' => 'X-LARGE',
-                     'JUMBO' => 'JUMBO',
-                     'DAMAGED' => 'DAMAGED',
-                     'BROKEN EGGS' => 'DAMAGED',
-                 ];
-                 
-                 // Build daily report
+                 // Build daily report with dynamic columns
                  $dailyReport = [];
-                 $totals = [
-                     'PULLETS' => 0,
-                     'SMALL' => 0,
-                     'MEDIUM' => 0,
-                     'LARGE' => 0,
-                     'X-LARGE' => 0,
-                     'JUMBO' => 0,
-                     'DAMAGED' => 0,
-                 ];
+                 $totals = [];
+                 
+                 // Initialize totals for all columns
+                 foreach ($columnNames as $colName) {
+                     $totals[$colName] = 0;
+                 }
                  
                  foreach ($dates as $date) {
                      $dateKey = $date->format('Y-m-d');
@@ -412,14 +476,12 @@ class ReportController extends Controller
                          'day' => $dayNumber,
                          'date' => $dateKey,
                          'hens' => $stockByDate[$dateKey] ?? $currentStock, // Use calculated stock count
-                         'PULLETS' => 0,
-                         'SMALL' => 0,
-                         'MEDIUM' => 0,
-                         'LARGE' => 0,
-                         'X-LARGE' => 0,
-                         'JUMBO' => 0,
-                         'DAMAGED' => 0,
                      ];
+                     
+                     // Initialize all product columns to 0
+                     foreach ($columnNames as $colName) {
+                         $row[$colName] = 0;
+                     }
                      
                      // Get production for this date
                      if (isset($logsByDate[$dateKey])) {
@@ -437,22 +499,20 @@ class ReportController extends Controller
                      $dailyReport[] = $row;
                  }
                  
-                 // Add totals row
-                 $dailyReport[] = [
+                 // Add totals row with dynamic columns
+                 $totalsRow = [
                      'day' => 'TOTAL',
                      'date' => '',
                      'hens' => '', // Empty for totals row
-                     'PULLETS' => $totals['PULLETS'],
-                     'SMALL' => $totals['SMALL'],
-                     'MEDIUM' => $totals['MEDIUM'],
-                     'LARGE' => $totals['LARGE'],
-                     'X-LARGE' => $totals['X-LARGE'],
-                     'JUMBO' => $totals['JUMBO'],
-                     'DAMAGED' => $totals['DAMAGED'],
                  ];
+                 foreach ($columnNames as $colName) {
+                     $totalsRow[$colName] = $totals[$colName] ?? 0;
+                 }
+                 $dailyReport[] = $totalsRow;
                  
                  $data['items'] = $dailyReport;
                  $data['monthYear'] = $startDate->format('F, Y');
+                 $data['columnNames'] = $columnNames; // Send column names to frontend
                  break;
         }
         return $data;

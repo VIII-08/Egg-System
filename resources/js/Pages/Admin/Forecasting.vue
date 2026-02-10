@@ -15,7 +15,7 @@ const isLoading = ref(false);
 // The form holds the user's selections
 const form = useForm({
     product_id: props.filters.product_id,
-    horizon: props.filters.horizon,
+    horizon: 30, // fixed to 30 days
 });
 
 watch(
@@ -95,20 +95,12 @@ const selectedProductName = computed(() => {
             <!-- Control Panel -->
             <div class="bg-white p-6 rounded-lg shadow space-y-4">
                 <h2 class="text-xl font-bold">Forecasting Options</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label for="product_id" class="font-medium">1. Select Egg Size to Forecast:</label>
                         <select v-model="form.product_id" id="product_id" class="mt-1 block w-full text-base rounded-md border-gray-300">
                             <option v-for="product in eggProducts" :key="product.id" :value="product.id">{{ product.name }}</option>
                         </select>
-                    </div>
-                    <div>
-                        <label class="font-medium">2. Select Forecast Period:</label>
-                        <div class="mt-2 flex space-x-4">
-                            <label class="flex items-center"><input type="radio" v-model="form.horizon" :value="7" name="horizon" class="form-radio"> <span class="ml-2">Next 7 Days</span></label>
-                            <label class="flex items-center"><input type="radio" v-model="form.horizon" :value="14" name="horizon" class="form-radio"> <span class="ml-2">Next 14 Days</span></label>
-                            <label class="flex items-center"><input type="radio" v-model="form.horizon" :value="30" name="horizon" class="form-radio"> <span class="ml-2">Next 30 Days</span></label>
-                        </div>
                     </div>
                 </div>
                 <p v-if="isLoading" class="text-sm text-gray-400">Updating forecast...</p>

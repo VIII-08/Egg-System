@@ -36,6 +36,21 @@ class ChickenStockController extends Controller
             'notes' => ['nullable', 'string', 'max:255'],
         ]);
 
+        // Get current stock before processing
+        $stockStat = FarmStat::firstOrCreate(
+            ['stat_key' => 'current_chicken_stock'],
+            ['stat_value' => 0]
+        );
+
+        // Validate removal doesn't exceed current stock
+        if ($validated['adjustment_type'] === 'removal') {
+            if ($validated['quantity'] > $stockStat->stat_value) {
+                return back()->withErrors([
+                    'quantity' => "Cannot remove {$validated['quantity']} chickens. Current stock is only {$stockStat->stat_value} chickens."
+                ])->withInput();
+            }
+        }
+
         DB::transaction(function () use ($validated, $request) {
             // Step 1: Create a log of the adjustment
             ChickenStockLog::create([

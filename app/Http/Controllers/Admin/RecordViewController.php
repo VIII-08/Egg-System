@@ -11,22 +11,37 @@ use App\Models\FinancialReport;
 use App\Models\EggProduct;
 use App\Models\FarmStat;
 use App\Models\User;
+use App\Models\ChickenStockLog;
+use App\Models\FeedUsageLog;
+use App\Models\AuditLog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class RecordViewController extends Controller
 {
     public function index(Request $request)
     {
         $filters = $request->validate([
-            'type' => ['sometimes', 'string', 'in:sales_transactions,expenses,production_logs,financial_summaries,current_egg_inventory,current_chicken_stock'],
+            'type' => ['sometimes', 'string', 'in:sales_transactions,expenses,production_logs,collectibles,financial_summaries,current_egg_inventory,current_chicken_stock,chicken_stock_logs,feed_usage_logs,current_feed_stock'],
             'from_date' => ['nullable', 'date'],
-            'to_date' => ['nullable', 'date'],
+            'to_date' => [
+                'nullable',
+                'date',
+                function ($attribute, $value, $fail) use ($request) {
+                    if ($request->filled('from_date') && $value < $request->from_date) {
+                        $fail('The end date must be on or after the start date.');
+                    }
+                },
+            ],
             'entered_by' => ['nullable', 'integer', 'exists:users,id'],
+            'production_view' => ['nullable', 'string', 'in:by_size,by_batch'],
+            'feed_entry_type' => ['nullable', 'string', 'in:addition,deduction'],
         ]);
         
         $recordType = $filters['type'] ?? 'sales_transactions';
+        $productionView = $filters['production_view'] ?? 'by_size';
         $records = null; // Start with a null value
 
         switch ($recordType) {
@@ -51,10 +66,46 @@ class RecordViewController extends Controller
                 break;
             
             case 'production_logs':
-                $records = ProductionLog::with(['user', 'eggProduct'])
-                    ->when($request->from_date, fn($q, $d) => $q->whereDate('log_date', '>=', $d))
-                    ->when($request->to_date, fn($q, $d) => $q->whereDate('log_date', '<=', $d))
-                    ->when($request->entered_by, fn($q, $u) => $q->where('user_id', $u))
+                if ($productionView === 'by_batch') {
+                    $logs = ProductionLog::with(['user', 'eggProduct'])
+                        ->when($request->from_date, fn($q, $d) => $q->whereDate('log_date', '>=', $d))
+                        ->when($request->to_date, fn($q, $d) => $q->whereDate('log_date', '<=', $d))
+                        ->when($request->entered_by, fn($q, $u) => $q->where('user_id', $u))
+                        ->whereNotNull('batch_reference')
+                        ->latest()
+                        ->get();
+
+                    $records = $logs->groupBy('batch_reference')->map(function ($group) {
+                        $first = $group->first();
+                        return [
+                            'batch_reference' => $first->batch_reference,
+                            'log_date' => $first->log_date,
+                            'created_at' => $first->created_at,
+                            'logged_by' => $first->user?->name,
+                            'total_quantity' => $group->sum('quantity'),
+                            'items' => $group->map(function ($log) {
+                                return [
+                                    'egg_size' => $log->eggProduct->name ?? 'Unknown',
+                                    'quantity' => (int) $log->quantity,
+                                ];
+                            })->values(),
+                        ];
+                    })->values();
+                } else {
+                    $records = ProductionLog::with(['user', 'eggProduct'])
+                        ->when($request->from_date, fn($q, $d) => $q->whereDate('log_date', '>=', $d))
+                        ->when($request->to_date, fn($q, $d) => $q->whereDate('log_date', '<=', $d))
+                        ->when($request->entered_by, fn($q, $u) => $q->where('user_id', $u))
+                        ->latest()
+                        ->paginate(15)
+                        ->withQueryString();
+                }
+                break;
+
+            case 'collectibles':
+                $records = \App\Models\Collectible::with(['salesTransaction', 'payments.recordedBy'])
+                    ->when($request->from_date, fn($q, $d) => $q->whereDate('created_at', '>=', $d))
+                    ->when($request->to_date, fn($q, $d) => $q->whereDate('created_at', '<=', $d))
                     ->latest()
                     ->paginate(15)
                     ->withQueryString();
@@ -78,13 +129,105 @@ class RecordViewController extends Controller
             case 'current_chicken_stock':
                  $records = FarmStat::where('stat_key', 'current_chicken_stock')->get(['stat_key', 'stat_value as quantity', 'updated_at']);
                 break;
+
+            case 'chicken_stock_logs':
+                $records = ChickenStockLog::with('user')
+                    ->when($request->from_date, fn($q, $d) => $q->whereDate('created_at', '>=', $d))
+                    ->when($request->to_date, fn($q, $d) => $q->whereDate('created_at', '<=', $d))
+                    ->when($request->entered_by, fn($q, $u) => $q->where('user_id', $u))
+                    ->latest()
+                    ->paginate(15)
+                    ->withQueryString();
+                break;
+
+            case 'feed_usage_logs':
+                $records = $this->buildFeedTransactions($request);
+                break;
+
+            case 'current_feed_stock':
+                $records = FarmStat::where('stat_key', 'current_feed_stock_kg')->get(['stat_key', 'stat_value as quantity', 'updated_at']);
+                break;
+        }
+
+        // Get current feed stock for display (when viewing feed-related records)
+        $currentFeedStock = null;
+        if (in_array($recordType, ['feed_usage_logs', 'current_feed_stock'])) {
+            $feedStat = FarmStat::where('stat_key', 'current_feed_stock_kg')->first();
+            $currentFeedStock = $feedStat ? $feedStat->stat_value : 0;
         }
 
         return Inertia::render('Admin/ViewRecords', [
             'records' => $records,
             'filters' => $filters,
             'users' => User::whereIn('role', ['staff-production', 'staff-marketing', 'treasurer'])->get(['id', 'name']),
+            'currentFeedStock' => $currentFeedStock,
         ]);
+    }
+
+    /**
+     * Build merged feed transactions (additions from Feeds expenses + deductions from FeedUsageLog)
+     */
+    private function buildFeedTransactions(Request $request): LengthAwarePaginator
+    {
+        $deductionsQuery = FeedUsageLog::query()->with('user');
+        $additionsQuery = Expense::query()
+            ->where('category', 'Feeds')
+            ->whereNotNull('feed_quantity_kg')
+            ->where('feed_quantity_kg', '>', 0)
+            ->with('user');
+
+        if ($request->filled('from_date')) {
+            $deductionsQuery->whereDate('created_at', '>=', $request->from_date);
+            $additionsQuery->whereDate('expense_date', '>=', $request->from_date);
+        }
+        if ($request->filled('to_date')) {
+            $deductionsQuery->whereDate('created_at', '<=', $request->to_date);
+            $additionsQuery->whereDate('expense_date', '<=', $request->to_date);
+        }
+        if ($request->filled('entered_by')) {
+            $deductionsQuery->where('user_id', $request->entered_by);
+            $additionsQuery->where('user_id', $request->entered_by);
+        }
+
+        $deductions = $deductionsQuery->get()->map(fn ($log) => [
+            'id' => 'feed-' . $log->id,
+            'reference' => 'FEED-' . $log->id,
+            'date' => $log->created_at,
+            'entry_type' => 'deduction',
+            'quantity_kg' => (float) $log->quantity_kg,
+            'recorded_by' => $log->user?->name ?? 'N/A',
+            'receipt_number' => null,
+            'receipt_image_url' => null,
+        ]);
+
+        $additions = $additionsQuery->get()->map(fn ($exp) => [
+            'id' => 'exp-' . $exp->id,
+            'reference' => 'EXP-' . $exp->id,
+            'date' => $exp->expense_date ?? $exp->created_at,
+            'entry_type' => 'addition',
+            'quantity_kg' => (float) $exp->feed_quantity_kg,
+            'recorded_by' => $exp->user?->name ?? 'N/A',
+            'receipt_number' => $exp->description,
+            'receipt_image_url' => $exp->receipt_image_url,
+        ]);
+
+        $merged = $deductions->concat($additions)->sortByDesc('date')->values();
+
+        // Filter by entry type (added vs taken) if specified
+        if ($request->filled('feed_entry_type') && in_array($request->feed_entry_type, ['addition', 'deduction'])) {
+            $merged = $merged->filter(fn ($item) => $item['entry_type'] === $request->feed_entry_type)->values();
+        }
+
+        $perPage = 15;
+        $currentPage = LengthAwarePaginator::resolveCurrentPage();
+        $paginator = new LengthAwarePaginator(
+            $merged->forPage($currentPage, $perPage)->values(),
+            $merged->count(),
+            $perPage,
+            $currentPage,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+        return $paginator->withQueryString();
     }
 
     public function viewFinancialReport($id)
@@ -134,6 +277,14 @@ class RecordViewController extends Controller
               ->setPaper('a4', 'portrait');
 
             $filename = "financial_report_{$report->start_date}_to_{$report->end_date}.pdf";
+            
+            // Log report download
+            $userName = Auth::user() ? Auth::user()->name : 'System';
+            AuditLog::createWithRequest([
+                'user_id' => Auth::id(),
+                'action' => 'financial_report_downloaded',
+                'log_entry' => "`{$userName}` downloaded financial report (ID: `{$report->id}`) for period `{$report->start_date}` to `{$report->end_date}`.",
+            ], request());
             
             // Use DomPDF's download method which sets proper headers
             return $pdf->download($filename);

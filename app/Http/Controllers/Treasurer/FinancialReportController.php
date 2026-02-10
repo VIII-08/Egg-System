@@ -9,6 +9,7 @@ use App\Models\SalesTransaction;
 use App\Models\Expense;
 use App\Models\ProductionLog;
 use App\Models\FinancialReport;
+use App\Models\Collectible;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
@@ -53,12 +54,17 @@ class FinancialReportController extends Controller
                 ->groupBy('eggProduct.name')
                 ->map->sum('quantity');
 
+            $amountReceivables = Collectible::sum('balance');
+            $cashCollected = max(0, $totalRevenue - $amountReceivables);
+
             $reportData = [
                 'startDateFormatted' => $startDate->format('F j, Y'),
                 'endDateFormatted' => $endDate->format('F j, Y'),
                 'totalRevenue' => (float) $totalRevenue,
                 'totalExpenses' => (float) $totalExpenses,
                 'netIncome' => (float) $totalRevenue - $totalExpenses,
+                'amountReceivables' => (float) $amountReceivables,
+                'cashCollected' => (float) $cashCollected,
                 'revenueBreakdown' => $revenueBreakdown,
                 'expenseBreakdown' => $expenseBreakdown,
                 'productionBreakdown' => $productionBreakdown,

@@ -21,7 +21,7 @@ class EggProductSeeder extends Seeder
             ['name' => 'Large', 'price' => 8.00],
             ['name' => 'XL', 'price' => 9.00],
             ['name' => 'Jumbo', 'price' => 10.00],
-            ['name' => 'Broken Eggs', 'price' => 0.00],
+            ['name' => 'Damaged Eggs', 'price' => 0.00],
         ];
 
         foreach ($products as $product) {

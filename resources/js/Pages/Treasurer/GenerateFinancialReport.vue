@@ -155,6 +155,14 @@ const formatCurrency = (value) => `₱${parseFloat(value).toLocaleString('en-US'
                              <td class="py-3 px-4 font-semibold">Total Revenue</td>
                              <td class="py-3 px-4 text-right font-semibold text-gray-700">{{ formatCurrency(reportData.totalRevenue) }}</td>
                          </tr>
+                        <tr class="border-b" v-if="reportData.amountReceivables !== undefined">
+                            <td class="py-3 px-4 font-semibold">Amount Receivables (Outstanding)</td>
+                            <td class="py-3 px-4 text-right font-semibold text-amber-700">{{ formatCurrency(reportData.amountReceivables) }}</td>
+                        </tr>
+                        <tr class="border-b" v-if="reportData.cashCollected !== undefined">
+                            <td class="py-3 px-4 font-semibold">Cash Collections (Revenue - Receivables)</td>
+                            <td class="py-3 px-4 text-right font-semibold text-emerald-700">{{ formatCurrency(reportData.cashCollected) }}</td>
+                        </tr>
                          <tr class="border-b">
                              <td class="py-3 px-4 font-semibold">Total Expenses</td>
                              <td class="py-3 px-4 text-right font-semibold text-gray-700">({{ formatCurrency(reportData.totalExpenses) }})</td>

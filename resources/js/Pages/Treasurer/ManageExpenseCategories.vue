@@ -36,11 +36,12 @@ const submitAdd = () => {
             addForm.reset();
             showAddForm.value = false;
         },
-        onError: () => {
+        onError: (errors) => {
+            const msg = errors.category || errors.role;
             Swal.fire({
                 icon: 'error',
-                title: 'Error',
-                text: 'Failed to add category. Please check the form for errors.',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Failed to add category. Please check your input.',
             });
         },
     });
@@ -131,9 +132,6 @@ const submitDelete = (category) => {
                                 placeholder="e.g., Feeds, Electricity"
                                 required
                             />
-                            <div v-if="addForm.errors.category" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.category }}
-                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">For Role</label>
@@ -145,9 +143,6 @@ const submitDelete = (category) => {
                                 <option value="staff-production">Production Staff</option>
                                 <option value="staff-marketing">Marketing Staff</option>
                             </select>
-                            <div v-if="addForm.errors.role" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.role }}
-                            </div>
                         </div>
                         <div class="flex items-end">
                             <button

@@ -57,11 +57,11 @@ class EggProductController extends Controller
 
         // Log the creation
         $userName = Auth::user() ? Auth::user()->name : 'System';
-        AuditLog::create([
+        AuditLog::createWithRequest([
             'user_id' => Auth::id(),
             'action' => 'egg_product_created',
             'log_entry' => "`{$userName}` added a new egg size: `{$product->name}` with price ₱{$product->price}.",
-        ]);
+        ], request());
 
         return back()->with('success', 'Egg product created successfully.');
     }
@@ -85,7 +85,33 @@ class EggProductController extends Controller
             }
         }
 
+        $oldName = $eggProduct->name;
+        $oldPrice = $eggProduct->price;
+        $oldDescription = $eggProduct->description;
+        
         $eggProduct->update($validated);
+        
+        // Build log entry for changes
+        $changes = [];
+        if ($oldName !== $eggProduct->name) {
+            $changes[] = "name from `{$oldName}` to `{$eggProduct->name}`";
+        }
+        if ($oldPrice != $eggProduct->price) {
+            $changes[] = "price from ₱{$oldPrice} to ₱{$eggProduct->price}";
+        }
+        if ($oldDescription !== $eggProduct->description) {
+            $changes[] = "description updated";
+        }
+        
+        if (!empty($changes)) {
+            $userName = Auth::user() ? Auth::user()->name : 'System';
+            $changesText = implode(', ', $changes);
+            AuditLog::createWithRequest([
+                'user_id' => Auth::id(),
+                'action' => 'egg_product_updated',
+                'log_entry' => "`{$userName}` updated egg product `{$eggProduct->name}`: {$changesText}.",
+            ], request());
+        }
 
         return back()->with('success', 'Egg product updated successfully.');
     }
@@ -104,11 +130,11 @@ class EggProductController extends Controller
 
         // Log the deletion
         $userName = Auth::user() ? Auth::user()->name : 'System';
-        AuditLog::create([
+        AuditLog::createWithRequest([
             'user_id' => Auth::id(),
             'action' => 'egg_product_deleted',
             'log_entry' => "`{$userName}` deleted the egg size: `{$productName}`.",
-        ]);
+        ], request());
 
         return back()->with('success', 'Egg product deleted successfully.');
     }

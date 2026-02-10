@@ -15,7 +15,9 @@ const props = defineProps({
 const form = useForm({
     collection_date: new Date().toISOString().slice(0, 10),
     quantities: (props.eggProducts || []).reduce((acc, product) => {
-        if (product.name !== 'Broken Eggs') {
+        // Exclude any product with "damage" in the name from the grid (it has its own separate field)
+        const productNameLower = product.name.toLowerCase();
+        if (!productNameLower.includes('damage')) {
             acc[product.id] = null;
         }
         return acc;
@@ -48,7 +50,27 @@ const submit = () => {
         onSuccess: () => {
             form.reset();
             router.reload({ only: ['recentLogs'] });
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'Production Logged!',
+                text: 'Egg production has been successfully logged.',
+                timer: 2000,
+                showConfirmButton: false,
+            });
         },
+        onError: (errors) => {
+            const errorMessage = errors.collection_date 
+                ? (Array.isArray(errors.collection_date) ? errors.collection_date[0] : errors.collection_date)
+                : 'An error occurred while logging production. Please try again.';
+            
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: errorMessage,
+                confirmButtonColor: '#3085d6',
+            });
+        }
     });
 };
 
@@ -70,14 +92,23 @@ const submit = () => {
                 <form @submit.prevent="submit" class="space-y-6">
                     <div>
                         <label for="collection_date" class="block text-sm font-medium text-gray-700">Collection Date</label>
-                        <input v-model="form.collection_date" type="date" id="collection_date" class="mt-1 block w-full md:w-1/2 rounded-md border-gray-300">
+                        <input 
+                            v-model="form.collection_date" 
+                            type="date" 
+                            id="collection_date" 
+                            :max="new Date().toISOString().slice(0, 10)"
+                            :min="new Date().toISOString().slice(0, 10)"
+                            readonly
+                            class="mt-1 block w-full md:w-1/2 rounded-md border-gray-300 bg-gray-100 cursor-not-allowed"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">Only today's date can be logged</p>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Quantity Collected (in pieces)</label>
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-2">
                             <!-- THIS IS THE FIX for the 'product' warning -->
                             <template v-for="p in eggProducts" :key="p.id">
-                                <div v-if="p.name !== 'Broken Eggs'">
+                                <div v-if="!p.name.toLowerCase().includes('damage')">
                                     <label :for="'qty_' + p.id" class="block text-xs text-gray-600">{{ p.name }}</label>
                                     <input v-model="form.quantities[p.id]" type="number" :id="'qty_' + p.id" placeholder="0" class="mt-1 block w-full rounded-md border-gray-300">
                                 </div>
@@ -85,7 +116,7 @@ const submit = () => {
                         </div>
                     </div>
                     <div class="border-t pt-6">
-                        <label for="broken_quantity" class="block text-lg font-bold text-red-700">Broken Eggs</label>
+                        <label for="broken_quantity" class="block text-lg font-bold text-red-700">Damaged Eggs</label>
                         <input v-model="form.broken_quantity" type="number" id="broken_quantity" placeholder="0" class="mt-2 block w-full md:w-1/2 rounded-md border-gray-300">
                     </div>
                     <div class="p-4 rounded-lg bg-green-100 text-center">

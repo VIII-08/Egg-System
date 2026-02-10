@@ -20,11 +20,11 @@ class ChickenStockLogObserver
         
         $logEntry = "`{$userName}` `{$actionVerb}` `{$chickenStockLog->quantity}` chickens due to '`{$chickenStockLog->reason}`'.";
 
-        AuditLog::create([
+        AuditLog::createWithRequest([
             'user_id' => $chickenStockLog->user_id,
             'action' => 'chicken_stock_adjusted',
             'log_entry' => $logEntry,
-        ]);
+        ], request());
     
     }
 
@@ -33,7 +33,29 @@ class ChickenStockLogObserver
      */
     public function updated(ChickenStockLog $chickenStockLog): void
     {
-        //
+        if ($chickenStockLog->wasChanged()) {
+            $userName = Auth::user() ? Auth::user()->name : 'System';
+            $changes = [];
+            
+            if ($chickenStockLog->wasChanged('quantity')) {
+                $changes[] = "quantity from `{$chickenStockLog->getOriginal('quantity')}` to `{$chickenStockLog->quantity}`";
+            }
+            if ($chickenStockLog->wasChanged('adjustment_type')) {
+                $changes[] = "adjustment type from `{$chickenStockLog->getOriginal('adjustment_type')}` to `{$chickenStockLog->adjustment_type}`";
+            }
+            if ($chickenStockLog->wasChanged('reason')) {
+                $changes[] = "reason updated";
+            }
+            
+            if (!empty($changes)) {
+                $changesText = implode(', ', $changes);
+                AuditLog::createWithRequest([
+                    'user_id' => Auth::id() ?? $chickenStockLog->user_id,
+                    'action' => 'chicken_stock_log_updated',
+                    'log_entry' => "`{$userName}` updated chicken stock log (ID: `{$chickenStockLog->id}`): {$changesText}."
+                ], request());
+            }
+        }
     }
 
     /**
@@ -41,7 +63,12 @@ class ChickenStockLogObserver
      */
     public function deleted(ChickenStockLog $chickenStockLog): void
     {
-        //
+        $userName = Auth::user() ? Auth::user()->name : 'System';
+        AuditLog::createWithRequest([
+            'user_id' => Auth::id() ?? $chickenStockLog->user_id,
+            'action' => 'chicken_stock_log_deleted',
+            'log_entry' => "`{$userName}` deleted chicken stock log (ID: `{$chickenStockLog->id}`) - {$chickenStockLog->adjustment_type} of `{$chickenStockLog->quantity}` chickens."
+        ], request());
     }
 
     /**

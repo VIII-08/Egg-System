@@ -4,13 +4,16 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import TreasurerLayout from '@/Layouts/TreasurerLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import Modal from '@/Components/Modal.vue';
+import Swal from 'sweetalert2';
 
 const props = defineProps({
     sales: Object,
     expenses: Object,
+    chickenStockLogs: Object,
+    feedUsageLogs: Object,
+    collectibles: Object,
     financialReports: Object,
     inventory: Object,
-    staffAudit: Array,
     filters: Object,
     reviewedReportsCount: Number,
 });
@@ -20,6 +23,8 @@ const hasViewedFinancialReports = ref(false);
 const newReportsCount = ref(0);
 const showViewReportModal = ref(false);
 const selectedReportForView = ref(null);
+const showBreakdownModal = ref(false);
+const selectedCollectible = ref(null);
 
 // Check localStorage on mount and compare with current reviewed reports count
 onMounted(() => {
@@ -59,10 +64,32 @@ const markFinancialReportsAsViewed = () => {
 const filterForm = useForm({
     start_date: props.filters.start_date || '',
     end_date: props.filters.end_date || '',
+    feed_entry_type: props.filters.feed_entry_type || '',
 });
 const submitFilter = () => { 
-    filterForm.get(route('treasurer.records.index'), { preserveState: true }); 
+    filterForm.get(route('treasurer.records.index'), { 
+        preserveState: true,
+        onError: (errors) => {
+            const msg = errors.end_date || errors.start_date;
+            Swal.fire({
+                icon: 'error',
+                title: 'Invalid Date Range',
+                text: Array.isArray(msg) ? msg[0] : msg || 'The end date must be on or after the start date.',
+            });
+        },
+    }); 
 };
+
+watch(() => filterForm.errors, (errors) => {
+    const msg = errors?.end_date || errors?.start_date;
+    if (msg) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Invalid Date Range',
+            text: Array.isArray(msg) ? msg[0] : msg,
+        });
+    }
+}, { deep: true });
 const formatCurrency = (value) => `₱${parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const downloadReport = (reportId) => {
@@ -90,12 +117,30 @@ const testReport = (reportId) => {
         .then(response => response.json())
         .then(data => {
             console.log('Test response:', data);
-            alert('Test successful: ' + data.message);
+            Swal.fire({
+                icon: 'success',
+                title: 'Test Successful',
+                text: data.message,
+            });
         })
         .catch(error => {
             console.error('Test error:', error);
-            alert('Test failed: ' + error.message);
+            Swal.fire({
+                icon: 'error',
+                title: 'Test Failed',
+                text: error.message || 'An error occurred.',
+            });
         });
+};
+
+const viewCollectibleBreakdown = (collectible) => {
+    selectedCollectible.value = collectible;
+    showBreakdownModal.value = true;
+};
+
+const closeBreakdownModal = () => {
+    showBreakdownModal.value = false;
+    selectedCollectible.value = null;
 };
 </script>
 
@@ -111,13 +156,15 @@ const testReport = (reportId) => {
                 <button @click="activeTab = 'inventory'" :class="[activeTab === 'inventory' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Inventory Status</button>
                 <button @click="activeTab = 'sales'" :class="[activeTab === 'sales' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Sales Transactions</button>
                 <button @click="activeTab = 'expenses'" :class="[activeTab === 'expenses' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Expense Records</button>
+                <button @click="activeTab = 'chicken'" :class="[activeTab === 'chicken' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Chicken Stock Logs</button>
+                <button @click="activeTab = 'feeds'" :class="[activeTab === 'feeds' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Feeds</button>
+                <button @click="activeTab = 'collectibles'" :class="[activeTab === 'collectibles' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Collectibles</button>
                 <button @click="activeTab = 'financial'" :class="[activeTab === 'financial' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg relative">
                     Financial Reports
                     <span v-if="newReportsCount > 0" class="ml-2 px-2 py-1 bg-yellow-400 text-yellow-900 text-xs font-bold rounded-full">
                         {{ newReportsCount }}
                     </span>
                 </button>
-                <button @click="activeTab = 'audit'" :class="[activeTab === 'audit' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg">Staff Activity</button>
             </nav>
         </div>
 
@@ -141,12 +188,19 @@ const testReport = (reportId) => {
                     <p class="text-lg text-gray-600">Live Heads</p>
                 </div>
              </div>
+             <div class="bg-white p-6 rounded-lg shadow">
+                <h2 class="text-xl font-bold mb-4">Feed Stock</h2>
+                <div class="text-center mt-8">
+                    <p class="text-6xl font-extrabold text-green-600">{{ (inventory?.feeds || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</p>
+                    <p class="text-lg text-gray-600">Kilograms</p>
+                </div>
+             </div>
         </div>
         
         <!-- Other Tabs (with date filters) -->
         <div v-else>
              <div class="bg-white p-4 rounded-lg shadow mb-6">
-                <form @submit.prevent="submitFilter" class="flex items-end space-x-4">
+                <form @submit.prevent="submitFilter" class="flex flex-wrap items-end gap-4">
                     <div>
                         <label for="start_date">Start Date</label>
                         <input v-model="filterForm.start_date" type="date" id="start_date" class="mt-1 block w-full rounded-md">
@@ -154,6 +208,14 @@ const testReport = (reportId) => {
                     <div>
                         <label for="end_date">End Date</label>
                         <input v-model="filterForm.end_date" type="date" id="end_date" class="mt-1 block w-full rounded-md">
+                    </div>
+                    <div v-if="activeTab === 'feeds'">
+                        <label for="feed_entry_type">Feed Type</label>
+                        <select v-model="filterForm.feed_entry_type" id="feed_entry_type" class="mt-1 block w-full rounded-md">
+                            <option value="">All (Added & Taken)</option>
+                            <option value="addition">Added only</option>
+                            <option value="deduction">Taken only</option>
+                        </select>
                     </div>
                     <PrimaryButton type="submit">Filter</PrimaryButton>
                 </form>
@@ -247,6 +309,173 @@ const testReport = (reportId) => {
                  </div>
              </div>
 
+             <!-- CHICKEN STOCK LOGS Tab -->
+             <div v-if="activeTab === 'chicken'" class="bg-white rounded-lg shadow-md">
+                 <div class="overflow-x-auto">
+                    <table class="w-full text-lg">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-4 text-left font-semibold text-gray-600">ID</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Date</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Type</th>
+                                <th class="p-4 text-right font-semibold text-gray-600">Quantity</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Reason</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Recorded By</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr v-for="log in chickenStockLogs.data" :key="log.id" class="hover:bg-gray-50">
+                                <td class="p-4 font-bold text-gray-700">CHK-{{ log.id }}</td>
+                                <td class="p-4 text-gray-600">{{ new Date(log.created_at).toLocaleDateString() }}</td>
+                                <td class="p-4">
+                                    <span v-if="log.adjustment_type === 'addition'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Addition</span>
+                                    <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Removal</span>
+                                </td>
+                                <td class="p-4 text-right font-bold" :class="log.adjustment_type === 'addition' ? 'text-green-600' : 'text-red-600'">
+                                    {{ log.adjustment_type === 'addition' ? '+' : '-' }}{{ log.quantity }}
+                                </td>
+                                <td class="p-4 text-gray-800">{{ log.reason }}</td>
+                                <td class="p-4 text-gray-800">{{ log.user?.name || 'N/A' }}</td>
+                                <td class="p-4 text-sm text-gray-500 italic">{{ log.notes || '-' }}</td>
+                            </tr>
+                            <tr v-if="chickenStockLogs.data.length === 0">
+                                <td colspan="7" class="p-8 text-center text-gray-500">No chicken stock adjustments found.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                 </div>
+                 <!-- Pagination -->
+                 <div class="p-4 flex justify-between items-center border-t">
+                      <div class="text-sm text-gray-600">Showing {{ chickenStockLogs.from }} to {{ chickenStockLogs.to }} of {{ chickenStockLogs.total }} results</div>
+                      <div>
+                        <Link v-if="chickenStockLogs.prev_page_url" :href="chickenStockLogs.prev_page_url" class="px-4 py-2 bg-gray-200 rounded-l-md">Previous</Link>
+                        <Link v-if="chickenStockLogs.next_page_url" :href="chickenStockLogs.next_page_url" class="px-4 py-2 bg-gray-200 rounded-r-md">Next</Link>
+                      </div>
+                 </div>
+             </div>
+
+             <!-- FEEDS Tab -->
+             <div v-if="activeTab === 'feeds'" class="bg-white rounded-lg shadow-md">
+                 <!-- Current Feed Stock Display -->
+                 <div class="p-6 bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-200">
+                     <div class="flex items-center justify-between">
+                         <div>
+                             <h3 class="text-lg font-semibold text-gray-700 mb-1">Current Feed Stock</h3>
+                             <p class="text-3xl font-bold text-green-700">{{ (inventory?.feeds || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} <span class="text-xl text-gray-600">kg</span></p>
+                         </div>
+                     </div>
+                 </div>
+
+                 <!-- Feed Usage History -->
+                 <div class="p-6">
+                     <h3 class="text-lg font-semibold text-gray-800 mb-4">Feed Usage History</h3>
+                     <div class="overflow-x-auto">
+                         <table class="w-full text-lg">
+                             <thead class="bg-gray-50">
+                                 <tr>
+                                     <th class="p-4 text-left font-semibold text-gray-600">Date & Time</th>
+                                     <th class="p-4 text-left font-semibold text-gray-600">ID</th>
+                                     <th class="p-4 text-right font-semibold text-gray-600">Quantity (kg)</th>
+                                    <th class="p-4 text-left font-semibold text-gray-600">Recorded By</th>
+                                    <th class="p-4 text-left font-semibold text-gray-600">Receipt Number</th>
+                                    <th class="p-4 text-center font-semibold text-gray-600">Receipt Pic</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y">
+                                <tr v-for="log in feedUsageLogs?.data || []" :key="log.id" class="hover:bg-gray-50">
+                                     <td class="p-4 text-gray-600">
+                                         <div>{{ new Date(log.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) }}</div>
+                                         <div class="text-xs text-gray-500">{{ new Date(log.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</div>
+                                     </td>
+                                     <td class="p-4 font-bold text-gray-700">{{ log.reference }}</td>
+                                     <td class="p-4 font-bold text-right" :class="log.entry_type === 'addition' ? 'text-green-600' : 'text-red-600'">
+                                         {{ log.entry_type === 'addition' ? '+' : '−' }}{{ parseFloat(log.quantity_kg || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} kg
+                                     </td>
+                                     <td class="p-4 text-gray-800">{{ log.recorded_by || 'N/A' }}</td>
+                                     <td class="p-4 text-sm text-gray-700">{{ log.receipt_number || '—' }}</td>
+                                     <td class="p-4 text-center">
+                                         <a v-if="log.receipt_image_url" :href="log.receipt_image_url" target="_blank" title="View receipt" class="inline-block">
+                                             <img :src="log.receipt_image_url" alt="Receipt" class="h-12 w-12 object-cover rounded-md cursor-pointer transition transform hover:scale-110">
+                                         </a>
+                                         <span v-else class="text-xs text-gray-400">—</span>
+                                     </td>
+                                 </tr>
+                                 <tr v-if="!feedUsageLogs?.data || feedUsageLogs.data.length === 0">
+                                    <td colspan="6" class="p-8 text-center text-gray-500">No feed usage records found.</td>
+                                </tr>
+                             </tbody>
+                         </table>
+                     </div>
+                     <!-- Pagination -->
+                     <div v-if="feedUsageLogs" class="p-4 flex justify-between items-center border-t">
+                         <div class="text-sm text-gray-600">Showing {{ feedUsageLogs.from }} to {{ feedUsageLogs.to }} of {{ feedUsageLogs.total }} results</div>
+                         <div>
+                             <Link v-if="feedUsageLogs.prev_page_url" :href="feedUsageLogs.prev_page_url" class="px-4 py-2 bg-gray-200 rounded-l-md">Previous</Link>
+                             <Link v-if="feedUsageLogs.next_page_url" :href="feedUsageLogs.next_page_url" class="px-4 py-2 bg-gray-200 rounded-r-md">Next</Link>
+                         </div>
+                     </div>
+                 </div>
+             </div>
+
+             <!-- COLLECTIBLES Tab -->
+             <div v-if="activeTab === 'collectibles'" class="bg-white rounded-lg shadow-md">
+                 <div class="overflow-x-auto">
+                    <table class="w-full text-lg">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-4 text-left font-semibold text-gray-600">Date</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Customer</th>
+                                <th class="p-4 text-right font-semibold text-gray-600">Total Bill</th>
+                                <th class="p-4 text-right font-semibold text-gray-600">Remaining Balance</th>
+                                <th class="p-4 text-left font-semibold text-gray-600">Status</th>
+                                <th class="p-4 text-center font-semibold text-gray-600">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr v-for="collectible in (collectibles?.data || [])" :key="collectible.id" class="hover:bg-gray-50">
+                                <td class="p-4 text-gray-600">{{ new Date(collectible.created_at).toLocaleDateString() }}</td>
+                                <td class="p-4 text-gray-800">{{ collectible.customer_name || collectible.sales_transaction?.customer_name || 'Walk-in' }}</td>
+                                <td class="p-4 text-right font-semibold text-gray-700">{{ formatCurrency(collectible.total_amount) }}</td>
+                                <td class="p-4 text-right font-semibold" :class="collectible.status === 'paid' ? 'text-green-700' : collectible.status === 'partial' ? 'text-amber-600' : 'text-red-700'">
+                                    {{ formatCurrency(collectible.balance) }}
+                                </td>
+                                <td class="p-4">
+                                    <span
+                                        class="px-3 py-1 rounded-full text-xs font-bold"
+                                        :class="{
+                                            'bg-green-100 text-green-800': collectible.status === 'paid',
+                                            'bg-yellow-100 text-yellow-800': collectible.status === 'partial',
+                                            'bg-red-100 text-red-800': collectible.status === 'unpaid',
+                                        }"
+                                    >
+                                        {{ collectible.status?.toUpperCase() || 'N/A' }}
+                                    </span>
+                                </td>
+                                <td class="p-4 text-center">
+                                    <button
+                                        type="button"
+                                        class="text-sm px-3 py-1.5 bg-green-500 text-white rounded-lg hover:bg-green-600"
+                                        @click="viewCollectibleBreakdown(collectible)"
+                                    >View Breakdown</button>
+                                </td>
+                            </tr>
+                            <tr v-if="!collectibles?.data || collectibles.data.length === 0">
+                                <td colspan="6" class="p-8 text-center text-gray-500">No collectibles found.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                 </div>
+                 <!-- Pagination -->
+                 <div v-if="collectibles" class="p-4 flex justify-between items-center border-t">
+                      <div class="text-sm text-gray-600">Showing {{ collectibles.from || 0 }} to {{ collectibles.to || 0 }} of {{ collectibles.total || 0 }} results</div>
+                      <div>
+                        <Link v-if="collectibles.prev_page_url" :href="collectibles.prev_page_url" class="px-4 py-2 bg-gray-200 rounded-l-md">Previous</Link>
+                        <Link v-if="collectibles.next_page_url" :href="collectibles.next_page_url" class="px-4 py-2 bg-gray-200 rounded-r-md">Next</Link>
+                      </div>
+                 </div>
+             </div>
+
              <!-- FINANCIAL REPORTS Tab -->
              <div v-if="activeTab === 'financial'" class="bg-white rounded-lg shadow-md">
                  <div class="overflow-x-auto">
@@ -311,28 +540,6 @@ const testReport = (reportId) => {
                  </div>
              </div>
 
-             <!-- STAFF AUDIT Tab -->
-             <div v-if="activeTab === 'audit'" class="bg-white p-6 rounded-lg shadow">
-                <h2 class="text-xl font-bold mb-4">Staff Activity Summary</h2>
-                 <table class="w-full text-lg">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="p-4 text-left">Staff Member</th>
-                            <th class="p-4 text-center">Production Logs</th>
-                            <th class="p-4 text-center">Expenses Logged</th>
-                            <th class="p-4 text-center">Sales Logged</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="user in staffAudit" :key="user.id" class="border-b">
-                            <td class="p-4 font-semibold">{{ user.name }}</td>
-                            <td class="p-4 text-center">{{ user.production_logs_count }}</td>
-                            <td class="p-4 text-center">{{ user.expenses_count }}</td>
-                            <td class="p-4 text-center">{{ user.sales_transactions_count }}</td>
-                        </tr>
-                    </tbody>
-                 </table>
-             </div>
         </div>
         <!-- View Financial Report Modal -->
         <Modal :show="showViewReportModal" @close="closeViewReportModal" max-width="5xl">
@@ -537,5 +744,93 @@ const testReport = (reportId) => {
                 </div>
             </div>
         </Modal>
+
+        <!-- Collectible Breakdown Modal -->
+        <div
+            v-if="showBreakdownModal && selectedCollectible"
+            class="fixed inset-0 z-50 flex items-start justify-center bg-black bg-opacity-40 px-4 py-10"
+            @click.self="closeBreakdownModal"
+        >
+            <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden border border-gray-100">
+                <div class="flex items-center justify-between px-6 py-4 border-b bg-gray-50">
+                    <div>
+                        <p class="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Collectible Breakdown</p>
+                        <h3 class="text-lg font-bold text-gray-900">{{ selectedCollectible.customer_name || 'Customer' }}</h3>
+                        <p class="text-sm text-gray-500">Created: {{ new Date(selectedCollectible.created_at).toLocaleDateString() }}</p>
+                    </div>
+                    <button type="button" class="text-gray-500 hover:text-gray-700" @click="closeBreakdownModal">✕</button>
+                </div>
+                <div class="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Total Amount</p>
+                            <p class="text-lg font-bold text-gray-900">{{ formatCurrency(selectedCollectible.total_amount) }}</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Amount Paid</p>
+                            <p class="text-lg font-bold text-emerald-700">{{ formatCurrency(selectedCollectible.amount_paid) }}</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Remaining</p>
+                            <p class="text-lg font-bold" :class="selectedCollectible.status === 'paid' ? 'text-emerald-700' : 'text-red-700'">
+                                {{ formatCurrency(selectedCollectible.balance) }}
+                            </p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Status</p>
+                            <p class="text-sm font-semibold">
+                                {{ selectedCollectible.status.toUpperCase() }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Last Payment</p>
+                            <p class="text-sm font-semibold text-gray-800">
+                                {{ selectedCollectible.last_payment_date ? new Date(selectedCollectible.last_payment_date).toLocaleDateString() : '—' }}
+                            </p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500">Fully Paid Date</p>
+                            <p class="text-sm font-semibold text-gray-800">
+                                {{ selectedCollectible.fully_paid_date ? new Date(selectedCollectible.fully_paid_date).toLocaleDateString() : '—' }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-700 mb-2">Payment History</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-100">
+                                    <tr>
+                                        <th class="p-2 text-left">Date</th>
+                                        <th class="p-2 text-right">Amount</th>
+                                        <th class="p-2 text-left">Method</th>
+                                        <th class="p-2 text-left">Recorded By</th>
+                                        <th class="p-2 text-left">Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-if="!selectedCollectible?.payments || selectedCollectible.payments.length === 0">
+                                        <td colspan="5" class="p-4 text-center text-gray-500">No payments yet.</td>
+                                    </tr>
+                                    <tr v-for="payment in (selectedCollectible?.payments || [])" :key="payment.id" class="border-b">
+                                        <td class="p-2">{{ payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : '—' }}</td>
+                                        <td class="p-2 text-right">{{ formatCurrency(payment.amount || 0) }}</td>
+                                        <td class="p-2">{{ payment.payment_method || '—' }}</td>
+                                        <td class="p-2">{{ payment.recorded_by?.name || '—' }}</td>
+                                        <td class="p-2">{{ payment.notes || '—' }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="px-6 py-4 border-t bg-gray-50 flex justify-end">
+                    <button type="button" class="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200" @click="closeBreakdownModal">Close</button>
+                </div>
+            </div>
+        </div>
     </TreasurerLayout>
 </template>

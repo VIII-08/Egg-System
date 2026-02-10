@@ -6,6 +6,7 @@ defineProps({
     totalEggInventory: Number,
     salesToday: Number,
     expensesToday: Number,
+    totalCollectibles: Number,
     recentActivities: Array,
 });
 </script>
@@ -18,7 +19,7 @@ defineProps({
 
         <div class="space-y-6">
             <!-- Metric Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="bg-white p-6 rounded-lg shadow">
                     <h4 class="text-sm font-medium text-gray-500">Sales Today</h4>
                     <p class="text-3xl font-bold text-gray-800 mt-2">₱{{ salesToday.toFixed(2) }}</p>
@@ -31,6 +32,11 @@ defineProps({
                     <h4 class="text-sm font-medium text-gray-500">Total Egg Inventory</h4>
                     <p class="text-3xl font-bold text-gray-800 mt-2">{{ totalEggInventory.toLocaleString() }} pcs</p>
                 </div>
+                <Link :href="route('collectibles.index')" class="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 block">
+                    <h4 class="text-sm font-medium text-gray-500">Total Collectibles</h4>
+                    <p class="text-3xl font-bold text-orange-600 mt-2">₱{{ totalCollectibles.toFixed(2) }}</p>
+                    <p class="text-xs text-orange-500 mt-1">Click to view collectibles</p>
+                </Link>
             </div>
 
             <!-- Recent Activity Table -->

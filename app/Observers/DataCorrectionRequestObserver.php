@@ -17,11 +17,11 @@ class DataCorrectionRequestObserver
         
         $logEntry = "`{$userName}` submitted a new data correction request for `{$request->request_type} #{$request->reference_id}`.";
 
-        AuditLog::create([
+        AuditLog::createWithRequest([
             'user_id' => $request->user_id,
             'action' => 'correction_request_created',
             'log_entry' => $logEntry,
-        ]);
+        ], request());
     }
 
     /**
@@ -39,11 +39,11 @@ class DataCorrectionRequestObserver
 
             $logEntry = "`{$adminName}` `{$statusAction}` the data correction request for `{$request->request_type} #{$request->reference_id}`.";
 
-            AuditLog::create([
+            AuditLog::createWithRequest([
                 'user_id' => $request->reviewed_by, // The admin who did the action
                 'action' => "correction_request_{$statusAction}",
                 'log_entry' => $logEntry,
-            ]);
+            ], request());
         }
     }
 }

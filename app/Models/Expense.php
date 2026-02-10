@@ -20,6 +20,7 @@ class Expense extends Model
         'user_id',
         'description',
         'category', // <-- Add this
+        'feed_quantity_kg',
         'amount',
         'expense_date',
         'receipt_image_path', // <-- And this

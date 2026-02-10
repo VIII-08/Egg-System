@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Staff\ProductionDashboardController;
 use App\Http\Controllers\Staff\ProductionLogController;
 use App\Http\Controllers\Staff\ChickenStockController;
+use App\Http\Controllers\Staff\FeedController;
 use App\Http\Controllers\Staff\ExpenseController;
 use App\Http\Controllers\Staff\DataCorrectionController;
 use App\Http\Controllers\Staff\RecordViewController;
@@ -66,6 +67,7 @@ Route::middleware('web')->group(function () {
                 Route::get('/reports/download-excel', [ReportController::class, 'downloadExcel'])->name('reports.download.excel');
                 Route::get('/expense-categories', [AdminExpenseCategoryController::class, 'index'])->name('expense-categories.index');
                 Route::post('/expense-categories', [AdminExpenseCategoryController::class, 'store'])->name('expense-categories.store');
+                Route::put('/expense-categories/{expenseCategory}', [AdminExpenseCategoryController::class, 'update'])->name('expense-categories.update');
                 Route::delete('/expense-categories/{expenseCategory}', [AdminExpenseCategoryController::class, 'destroy'])->name('expense-categories.destroy');
                 Route::get('/egg-products', [AdminEggProductController::class, 'index'])->name('egg-products.index');
                 Route::post('/egg-products', [AdminEggProductController::class, 'store'])->name('egg-products.store');
@@ -73,6 +75,11 @@ Route::middleware('web')->group(function () {
                 Route::delete('/egg-products/{egg_product}', [AdminEggProductController::class, 'destroy'])->name('egg-products.destroy');
                 Route::get('/forecasting', [App\Http\Controllers\Admin\ForecastingController::class, 'index'])->name('forecasting.index');
             });
+
+        // Collectible payments (admin or marketing staff)
+        Route::middleware(['auth', 'role:admin,staff-marketing'])->group(function () {
+            Route::post('/collectibles/{collectible}/payments', [App\Http\Controllers\Admin\CollectibleController::class, 'storePayment'])->name('collectibles.payments.store');
+        });
 
        // ** TREASURER ROUTES **
         Route::middleware(['auth', 'role:treasurer'])->prefix('treasurer')->name('treasurer.')->group(function () {
@@ -117,6 +124,8 @@ Route::middleware('web')->group(function () {
 
                     Route::get('/chicken-stock', [ChickenStockController::class, 'index'])->name('chicken.stock.index');
                     Route::post('/chicken-stock', [ChickenStockController::class, 'store'])->name('chicken.stock.store');
+                    
+                    Route::post('/feed/record-usage', [FeedController::class, 'recordUsage'])->name('feed.record-usage');
                 });
 
                 // --- MARKETING-ONLY ROUTES ---
@@ -125,6 +134,8 @@ Route::middleware('web')->group(function () {
 
                     Route::get('/record-sale', [SalesController::class, 'create'])->name('sales.create');
                     Route::post('/record-sale', [SalesController::class, 'store'])->name('sales.store');
+                    
+                    Route::get('/collectibles', [App\Http\Controllers\Staff\CollectibleController::class, 'index'])->name('collectibles.index');
                 });
 
                 // --- SHARED STAFF ROUTES (both roles can access) ---
@@ -135,6 +146,7 @@ Route::middleware('web')->group(function () {
 
                 Route::get('/data-correction/create', [DataCorrectionController::class, 'create'])->name('data-correction.create');
                 Route::post('/data-correction', [DataCorrectionController::class, 'store'])->name('data-correction.store');
+                Route::get('/data-correction/sales-transaction/{id}', [DataCorrectionController::class, 'getSalesTransaction'])->name('data-correction.get-sales-transaction');
             });
     });
 

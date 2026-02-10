@@ -55,9 +55,12 @@ const form = useForm({
     description_of_error: '',
     proposed_correction: '',
     receipt_image: null,
+    selected_egg_size_id: null, // For sales transaction corrections
 });
 
 const receiptPreview = ref(null);
+const salesTransactionData = ref(null);
+const loadingTransaction = ref(false);
 
 // Function to handle the file selection
 function handleFileChange(event) {
@@ -73,6 +76,127 @@ function handleFileChange(event) {
     };
     reader.readAsDataURL(file);
 }
+
+// Function to restrict reference_id input to numbers only for non-expense record types
+function handleReferenceIdInput(event) {
+    // If it's not an expense record, only allow numbers
+    if (form.request_type && form.request_type !== 'Expense Record') {
+        // Remove any non-numeric characters
+        const numericValue = event.target.value.replace(/[^0-9]/g, '');
+        form.reference_id = numericValue ? parseInt(numericValue, 10) : null;
+        
+        // Update the input field value
+        if (event.target.value !== numericValue) {
+            event.target.value = numericValue || '';
+        }
+    }
+}
+
+// Function to get the appropriate placeholder for description field
+function getDescriptionPlaceholder() {
+    if (form.request_type === 'Sales Transaction') {
+        return "e.g., 'I entered 50 pcs of SMALL eggs but it should have been 100 pcs.'";
+    } else if (form.request_type === 'Expense Record') {
+        return "e.g., 'I entered the wrong amount or receipt number.'";
+    } else if (form.request_type === 'Egg Production Log') {
+        return "e.g., 'I entered 50 eggs but it should have been 500.'";
+    } else if (form.request_type === 'Collectibles') {
+        return "e.g., 'I entered the wrong amount paid or balance.'";
+    } else if (form.request_type === 'Feed Usage Record') {
+        return "e.g., 'I entered 50 kg but it should have been 75.5 kg.'";
+    } else {
+        return "e.g., 'I entered incorrect information.'";
+    }
+}
+
+// Function to restrict proposed_correction input - numbers for most types, decimals allowed for Feed Usage Record
+function handleProposedCorrectionInput(event) {
+    if (form.request_type === 'Expense Record') return;
+    if (form.request_type === 'Feed Usage Record') {
+        // Allow numbers and one decimal point
+        let value = event.target.value.replace(/[^0-9.]/g, '');
+        const parts = value.split('.');
+        if (parts.length > 2) {
+            value = parts[0] + '.' + parts.slice(1).join('');
+        }
+        form.proposed_correction = value;
+        if (event.target.value !== value) {
+            event.target.value = value;
+        }
+    } else if (form.request_type) {
+        // For other non-expense types, only allow integers
+        const numericValue = event.target.value.replace(/[^0-9]/g, '');
+        form.proposed_correction = numericValue;
+        if (event.target.value !== numericValue) {
+            event.target.value = numericValue;
+        }
+    }
+}
+
+// Function to fetch sales transaction details
+async function fetchSalesTransaction() {
+    if (form.request_type === 'Sales Transaction' && form.reference_id) {
+        loadingTransaction.value = true;
+        try {
+            const response = await fetch(route('data-correction.get-sales-transaction', form.reference_id), {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            });
+            if (response.ok) {
+                salesTransactionData.value = await response.json();
+            } else {
+                salesTransactionData.value = null;
+            }
+        } catch (error) {
+            salesTransactionData.value = null;
+        } finally {
+            loadingTransaction.value = false;
+        }
+    } else {
+        salesTransactionData.value = null;
+        form.selected_egg_size_id = null;
+    }
+}
+
+// Watch for request_type changes and clean reference_id if needed
+watch(() => form.request_type, (newType, oldType) => {
+    // If switching to a non-expense type and reference_id contains non-numeric characters, clean it
+    if (newType && newType !== 'Expense Record' && form.reference_id) {
+        const referenceIdStr = String(form.reference_id);
+        if (!/^\d+$/.test(referenceIdStr)) {
+            const numericValue = referenceIdStr.replace(/[^0-9]/g, '');
+            form.reference_id = numericValue ? parseInt(numericValue, 10) : null;
+        }
+    }
+    
+    // If switching type, clean proposed_correction appropriately
+    if (newType && form.proposed_correction) {
+        if (newType === 'Feed Usage Record') {
+            let value = form.proposed_correction.replace(/[^0-9.]/g, '');
+            const parts = value.split('.');
+            if (parts.length > 2) value = parts[0] + '.' + parts.slice(1).join('');
+            form.proposed_correction = value;
+        } else if (newType !== 'Expense Record') {
+            form.proposed_correction = form.proposed_correction.replace(/[^0-9]/g, '');
+        }
+    }
+    
+    // Reset sales transaction data when type changes
+    if (newType !== 'Sales Transaction') {
+        salesTransactionData.value = null;
+        form.selected_egg_size_id = null;
+    }
+});
+
+// Watch for reference_id changes to fetch sales transaction
+watch(() => form.reference_id, () => {
+    if (form.request_type === 'Sales Transaction') {
+        fetchSalesTransaction();
+    }
+});
 
 const submit = () => {
     // Frontend validation before submitting
@@ -92,6 +216,19 @@ const submit = () => {
         });
         return;
     }
+    
+    // Validate that reference_id is numeric for non-expense record types
+    if (form.request_type !== 'Expense Record') {
+        const referenceIdStr = String(form.reference_id);
+        if (!/^\d+$/.test(referenceIdStr)) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Invalid Reference ID',
+                text: 'Reference ID must be a number for this record type.',
+            });
+            return;
+        }
+    }
     if (!form.description_of_error.trim()) {
         Swal.fire({
             icon: 'error',
@@ -105,6 +242,38 @@ const submit = () => {
             icon: 'error',
             title: 'Missing Information',
             text: 'Please provide the proposed correction.',
+        });
+        return;
+    }
+    
+    // Validate proposed_correction format based on record type
+    if (form.request_type !== 'Expense Record' && form.request_type !== 'Sales Transaction') {
+        const proposedCorrectionStr = String(form.proposed_correction).trim();
+        if (form.request_type === 'Feed Usage Record') {
+            if (!/^\d+(\.\d+)?$|^\d*\.\d+$/.test(proposedCorrectionStr) || parseFloat(proposedCorrectionStr) < 0.01) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Invalid Correction Value',
+                    text: 'Please enter a valid quantity in kg (e.g., 50 or 75.5).',
+                });
+                return;
+            }
+        } else if (form.request_type && !/^\d+$/.test(proposedCorrectionStr)) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Invalid Correction Value',
+                text: 'The correction value must be a number for this record type.',
+            });
+            return;
+        }
+    }
+    
+    // Validate egg size selection for sales transactions
+    if (form.request_type === 'Sales Transaction' && !form.selected_egg_size_id) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Missing Information',
+            text: 'Please select which egg size needs correction.',
         });
         return;
     }
@@ -130,6 +299,31 @@ const submit = () => {
 };
 
 const submitForm = () => {
+    // Ensure reference_id is a number for non-expense record types before submission
+    if (form.request_type && form.request_type !== 'Expense Record' && form.reference_id) {
+        const referenceIdStr = String(form.reference_id);
+        const numericValue = referenceIdStr.replace(/[^0-9]/g, '');
+        if (numericValue) {
+            form.reference_id = parseInt(numericValue, 10);
+        } else {
+            form.reference_id = null;
+        }
+    }
+    
+    // For Feed Usage Record, ensure proposed_correction is trimmed (decimals allowed)
+    if (form.request_type === 'Feed Usage Record' && form.proposed_correction) {
+        form.proposed_correction = String(form.proposed_correction).trim();
+    }
+    // For sales transactions, format proposed_correction as "sale_item_id:quantity"
+    if (form.request_type === 'Sales Transaction' && form.selected_egg_size_id && form.proposed_correction) {
+        const numericValue = form.proposed_correction.replace(/[^0-9]/g, '');
+        form.proposed_correction = `${form.selected_egg_size_id}:${numericValue}`;
+    } else if (form.request_type && form.request_type !== 'Expense Record' && form.request_type !== 'Feed Usage Record' && form.proposed_correction) {
+        // Ensure proposed_correction contains only integers for other non-expense record types
+        const numericValue = form.proposed_correction.replace(/[^0-9]/g, '');
+        form.proposed_correction = numericValue;
+    }
+    
     // Confirmation alert before sending the request
     Swal.fire({
         title: 'Submit this request?',
@@ -154,12 +348,28 @@ const submitForm = () => {
                         showConfirmButton: false,
                     });
                 },
-                onError: () => {
+                onError: (errors) => {
                     // This handles server-side validation errors
+                    let errorMessage = 'Please check the form for errors and try again.';
+                    
+                    // Show specific error message if available (Inertia errors are arrays)
+                    const getFirstError = (field) => {
+                        if (errors[field] && errors[field].length > 0) {
+                            return Array.isArray(errors[field]) ? errors[field][0] : errors[field];
+                        }
+                        return null;
+                    };
+                    
+                    errorMessage = getFirstError('reference_id') || 
+                                  getFirstError('request_type') || 
+                                  getFirstError('description_of_error') || 
+                                  getFirstError('proposed_correction') || 
+                                  errorMessage;
+                    
                     Swal.fire({
                         icon: 'error',
                         title: 'Submission Failed',
-                        text: 'Please check the form for errors and try again.',
+                        text: errorMessage,
                     });
                 }
             });
@@ -203,31 +413,83 @@ const submitForm = () => {
                             <option :value="null" disabled>Select a record type...</option>
                             <option v-for="type in requestTypes" :key="type" :value="type">{{ type }}</option>
                         </select>
-                         <div v-if="form.errors.request_type" class="text-sm text-red-600 mt-1">{{ form.errors.request_type }}</div>
                     </div>
 
                      <div>
                         <label for="reference_id" class="block text-lg font-medium text-gray-700">2. What is the Reference ID of the record?</label>
                          <p class="text-sm text-gray-500 mt-1">You can find this ID in the "View My Records" page for the specific log or expense.</p>
-                        <input v-model="form.reference_id" type="number" id="reference_id" class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" placeholder="e.g., 123">
-                         <div v-if="form.errors.reference_id" class="text-sm text-red-600 mt-1">{{ form.errors.reference_id }}</div>
+                        <input 
+                            v-model="form.reference_id" 
+                            type="text" 
+                            id="reference_id" 
+                            class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" 
+                            placeholder="e.g., 123"
+                            @input="handleReferenceIdInput"
+                            :pattern="form.request_type !== 'Expense Record' ? '[0-9]*' : null"
+                            inputmode="numeric"
+                        >
                     </div>
 
                      <div>
                         <label for="description_of_error" class="block text-lg font-medium text-gray-700">3. Briefly describe the error.</label>
-                         <textarea v-model="form.description_of_error" id="description_of_error" rows="4" class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" placeholder="e.g., 'I entered 50 eggs but it should have been 500.'"></textarea>
-                         <div v-if="form.errors.description_of_error" class="text-sm text-red-600 mt-1">{{ form.errors.description_of_error }}</div>
+                         <textarea 
+                            v-model="form.description_of_error" 
+                            id="description_of_error" 
+                            rows="4" 
+                            class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" 
+                            :placeholder="getDescriptionPlaceholder()"
+                         ></textarea>
                     </div>
                     
+                     <!-- Egg Size Selection for Sales Transaction -->
+                     <div v-if="form.request_type === 'Sales Transaction' && salesTransactionData && salesTransactionData.items">
+                        <label for="selected_egg_size_id" class="block text-lg font-medium text-gray-700">3a. Which egg size needs correction?</label>
+                        <p class="text-sm text-gray-500 mt-1 mb-2">Select the egg size that was incorrectly recorded.</p>
+                        <select 
+                            v-model="form.selected_egg_size_id" 
+                            id="selected_egg_size_id" 
+                            class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
+                        >
+                            <option :value="null" disabled>Select an egg size...</option>
+                            <option v-for="item in salesTransactionData.items" :key="item.id" :value="item.id">
+                                {{ item.product_name }} - Current: {{ item.quantity }} pcs @ ₱{{ parseFloat(item.price).toFixed(2) }}
+                            </option>
+                        </select>
+                        <div v-if="loadingTransaction" class="text-sm text-gray-500 mt-2">Loading transaction details...</div>
+                    </div>
+
                      <div>
-                        <label for="proposed_correction" class="block text-lg font-medium text-gray-700">4. What is the correct value?</label>
+                        <label for="proposed_correction" class="block text-lg font-medium text-gray-700">
+                            <span v-if="form.request_type === 'Sales Transaction'">3b. What is the correct quantity of eggs sold?</span>
+                            <span v-else>4. What is the correct value?</span>
+                        </label>
                          <p class="text-sm text-gray-500 mt-1 mb-2">
                              <span v-if="form.request_type === 'Expense Record'">For expenses:</span>
                              <span v-if="form.request_type === 'Expense Record'">Use phrases like <b>"change amount to 500"</b>, <b>"change receipt number to OR#12345"</b>, or <b>"change category to Feed"</b>.</span>
-                             <span v-else>e.g., 'Please change the quantity to 500.'</span>
+                             <span v-else-if="form.request_type === 'Sales Transaction'">Enter the correct number of eggs sold. The total amount will be recalculated automatically.</span>
+                             <span v-else-if="form.request_type === 'Collectibles'">Enter the correct amount paid or balance (e.g., 500.00).</span>
+                             <span v-else-if="form.request_type === 'Feed Usage Record'">Enter the correct quantity in kg (e.g., 50 or 75.5).</span>
+                             <span v-else>Enter only numbers (e.g., 500).</span>
                          </p>
-                         <textarea v-model="form.proposed_correction" id="proposed_correction" rows="4" class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" :placeholder="form.request_type === 'Expense Record' ? 'e.g., \'Please change receipt number to OR#12345\' or \'Please change amount to 500\'' : 'e.g., \'Please change the quantity to 500.\''"></textarea>
-                         <div v-if="form.errors.proposed_correction" class="text-sm text-red-600 mt-1">{{ form.errors.proposed_correction }}</div>
+                         <textarea 
+                            v-if="form.request_type === 'Expense Record'"
+                            v-model="form.proposed_correction" 
+                            id="proposed_correction" 
+                            rows="4" 
+                            class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" 
+                            placeholder="e.g., 'Please change receipt number to OR#12345' or 'Please change amount to 500'"
+                         ></textarea>
+                         <input
+                            v-else
+                            v-model="form.proposed_correction" 
+                            type="text"
+                            id="proposed_correction" 
+                            class="mt-2 block w-full text-base rounded-md border-gray-300 shadow-sm" 
+                            :placeholder="form.request_type === 'Sales Transaction' ? 'e.g., 50' : form.request_type === 'Collectibles' ? 'e.g., 500.00' : form.request_type === 'Feed Usage Record' ? 'e.g., 75.5' : 'e.g., 500'"
+                            @input="handleProposedCorrectionInput"
+                            :pattern="form.request_type === 'Expense Record' ? null : form.request_type === 'Feed Usage Record' ? '[0-9.]*' : '[0-9]*'"
+                            :inputmode="form.request_type === 'Feed Usage Record' ? 'decimal' : 'numeric'"
+                         >
                     </div>
 
                     <!-- Receipt Image Upload (Only for Expense Record) -->
@@ -253,7 +515,6 @@ const submitForm = () => {
                                 <button v-if="receiptPreview" @click.prevent="form.receipt_image = null; receiptPreview = null; document.getElementById('receipt-upload').value = ''" type="button" class="mt-2 text-xs text-red-600 hover:text-red-800">Remove image</button>
                             </div>
                         </div>
-                        <div v-if="form.errors.receipt_image" class="text-sm text-red-600 mt-1">{{ form.errors.receipt_image }}</div>
                     </div>
                     
                     <div class="pt-4">

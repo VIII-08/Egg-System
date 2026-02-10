@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
+use App\Models\AuditLog;
 
 class AuthenticatedSessionController extends Controller
 {
@@ -39,6 +40,13 @@ class AuthenticatedSessionController extends Controller
         $user->last_login_at = now();
         $user->save();
 
+        // Log login event
+        AuditLog::createWithRequest([
+            'user_id' => $user->id,
+            'action' => 'user_login',
+            'log_entry' => "`{$user->name}` logged into the system.",
+        ], $request);
+
         return match ($user->role) {
             'admin' => redirect()->route('admin.dashboard'),
             'staff-production' => redirect()->route('production.dashboard'),
@@ -53,6 +61,17 @@ class AuthenticatedSessionController extends Controller
      */
     public function destroy(Request $request): RedirectResponse
     {
+        $user = Auth::user();
+        
+        // Log logout event before logging out
+        if ($user) {
+            AuditLog::createWithRequest([
+                'user_id' => $user->id,
+                'action' => 'user_logout',
+                'log_entry' => "`{$user->name}` logged out of the system.",
+            ], $request);
+        }
+
         Auth::guard('web')->logout();
 
         $request->session()->invalidate();

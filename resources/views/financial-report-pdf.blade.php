@@ -210,7 +210,7 @@
 
     <div class="footer">
         @if($report->status === 'approved')
-            <p>This report was approved on {{ $report->reviewed_at ? \Carbon\Carbon::parse($report->reviewed_at)->format('F j, Y \a\t g:i A') : 'N/A' }}</p>
+        <p>This report was approved on {{ $report->reviewed_at ? \Carbon\Carbon::parse($report->reviewed_at)->format('F j, Y \a\t g:i A') : 'N/A' }}</p>
         @elseif($report->status === 'rejected')
             <p>This report was rejected on {{ $report->reviewed_at ? \Carbon\Carbon::parse($report->reviewed_at)->format('F j, Y \a\t g:i A') : 'N/A' }}</p>
         @else

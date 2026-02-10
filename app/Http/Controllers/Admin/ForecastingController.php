@@ -19,25 +19,25 @@ class ForecastingController extends Controller
         // --- 1. Validate User's Choices (with default values) ---
         $validated = $request->validate([
             'product_id' => 'nullable|integer|exists:egg_products,id',
-            'horizon' => 'nullable|integer|in:7,14,30',
+            'horizon' => 'nullable|integer|in:30',
         ]);
 
         $defaultProductId = EggProduct::whereRaw('LOWER(name) = ?', ['medium'])
-            ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+            ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
             ->where('name', '!=', 'DAMAGED')
             ->value('id')
             ?? EggProduct::where('name', '!=', 'DAMAGED')
-                ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+                ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
                 ->orderBy('id')
                 ->value('id');
 
         $productId = $validated['product_id'] ?? $defaultProductId;
-        $horizon = $validated['horizon'] ?? 7; // Default to 7 days
+        $horizon = $validated['horizon'] ?? 30; // Default to 30 days
 
         $selectedProduct = EggProduct::findOrFail($productId);
         
-        // Prevent forecasting for Broken Eggs or Damaged eggs
-        if (strtolower($selectedProduct->name) === 'broken eggs' || $selectedProduct->name === 'DAMAGED') {
+        // Prevent forecasting for Damaged Eggs
+        if (strtolower($selectedProduct->name) === 'damaged eggs' || $selectedProduct->name === 'DAMAGED') {
             $productId = $defaultProductId;
             $selectedProduct = EggProduct::findOrFail($productId);
         }
@@ -106,7 +106,14 @@ class ForecastingController extends Controller
 
             if ($prophetRecord && !empty($prophetRecord['forecast'])) {
                 $prophetSeries = collect($prophetRecord['forecast']);
-                $prophetSubset = $prophetSeries->take($horizon);
+                
+                // Filter to only future dates (from today onwards) and take the requested horizon
+                $today = Carbon::today()->toDateString();
+                $prophetSubset = $prophetSeries
+                    ->filter(function ($item) use ($today) {
+                        return $item['date'] >= $today;
+                    })
+                    ->take($horizon);
 
                 if ($prophetSubset->isNotEmpty()) {
                     $usingProphet = true;
@@ -162,7 +169,7 @@ class ForecastingController extends Controller
 
         return Inertia::render('Admin/Forecasting', [
             'eggProducts' => EggProduct::where('name', '!=', 'DAMAGED')
-                ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+                ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
                 ->orderBy('name')
                 ->get(['id', 'name']),
             'forecastData' => $forecastData,
@@ -205,7 +212,7 @@ class ForecastingController extends Controller
             'LARGE' => 'LARGE',
             'JUMBO' => 'JUMBO',
             'PEWEE' => 'PEWEE',
-            'BROKEN EGGS' => 'BROKEN EGGS',
+            'DAMAGED EGGS' => 'DAMAGED EGGS',
         ];
 
         // Try exact match first

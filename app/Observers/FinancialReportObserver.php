@@ -18,11 +18,11 @@ class FinancialReportObserver
         
         $logEntry = "`{$userName}` submitted the Financial Report for the period `{$report->start_date}` to `{$report->end_date}` for review.";
 
-        AuditLog::create([
+        AuditLog::createWithRequest([
             'user_id' => $report->generated_by,
             'action' => 'financial_report_submitted',
             'log_entry' => $logEntry,
-        ]);
+        ], request());
     }
     
     /**
@@ -40,11 +40,11 @@ class FinancialReportObserver
 
                 $logEntry = "`{$adminName}` `{$statusAction}` the Financial Report for the period `{$report->start_date}` to `{$report->end_date}`.";
                 
-                AuditLog::create([
+                AuditLog::createWithRequest([
                     'user_id' => $report->reviewed_by,
                     'action' => "financial_report_{$statusAction}",
                     'log_entry' => $logEntry,
-                ]);
+                ], request());
             }
         }
     }

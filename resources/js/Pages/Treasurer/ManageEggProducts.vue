@@ -53,11 +53,12 @@ const submitAdd = () => {
             addForm.reset();
             showAddForm.value = false;
         },
-        onError: () => {
+        onError: (errors) => {
+            const msg = errors.name || errors.price || errors.stock_quantity || errors.description;
             Swal.fire({
                 icon: 'error',
-                title: 'Error',
-                text: 'Failed to create product. Please check the form for errors.',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Failed to create product. Please check your input.',
             });
         },
     });
@@ -77,11 +78,12 @@ const submitEdit = (productId) => {
             editingProduct.value = null;
             editForm.reset();
         },
-        onError: () => {
+        onError: (errors) => {
+            const msg = errors.name || errors.price || errors.stock_quantity || errors.description;
             Swal.fire({
                 icon: 'error',
-                title: 'Error',
-                text: 'Failed to update product. Please check the form for errors.',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Failed to update product. Please check your input.',
             });
         },
     });
@@ -158,9 +160,6 @@ const submitDelete = (product) => {
                                 placeholder="e.g., Extra Large, Premium"
                                 required
                             />
-                            <div v-if="addForm.errors.name" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.name }}
-                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Price (₱) *</label>
@@ -173,9 +172,6 @@ const submitDelete = (product) => {
                                 placeholder="0.00"
                                 required
                             />
-                            <div v-if="addForm.errors.price" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.price }}
-                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Initial Stock Quantity</label>
@@ -186,9 +182,6 @@ const submitDelete = (product) => {
                                 class="w-full rounded-md border-gray-300"
                                 placeholder="0"
                             />
-                            <div v-if="addForm.errors.stock_quantity" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.stock_quantity }}
-                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -198,9 +191,6 @@ const submitDelete = (product) => {
                                 class="w-full rounded-md border-gray-300"
                                 placeholder="Optional description"
                             />
-                            <div v-if="addForm.errors.description" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.description }}
-                            </div>
                         </div>
                     </div>
                     <div class="mt-4">
@@ -242,9 +232,6 @@ const submitDelete = (product) => {
                                         class="w-full rounded-md border-gray-300"
                                         required
                                     />
-                                    <div v-if="editForm.errors.name" class="text-red-600 text-sm mt-1">
-                                        {{ editForm.errors.name }}
-                                    </div>
                                 </td>
                                 <td class="px-4 py-3">
                                     <div v-if="editingProduct !== product.id" class="text-gray-600">
@@ -259,9 +246,6 @@ const submitDelete = (product) => {
                                         class="w-full rounded-md border-gray-300"
                                         required
                                     />
-                                    <div v-if="editForm.errors.price" class="text-red-600 text-sm mt-1">
-                                        {{ editForm.errors.price }}
-                                    </div>
                                 </td>
                                 <td class="px-4 py-3 text-gray-600">
                                     {{ product.stock_quantity }} pcs

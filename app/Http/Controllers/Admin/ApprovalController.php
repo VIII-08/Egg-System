@@ -8,6 +8,10 @@ use App\Models\FinancialReport;
 use App\Models\ProductionLog;
 use App\Models\EggProduct;
 use App\Models\Expense;
+use App\Models\SalesTransaction;
+use App\Models\Collectible;
+use App\Models\FeedUsageLog;
+use App\Models\FarmStat;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -37,6 +41,49 @@ class ApprovalController extends Controller
                         $request->uploaded_receipt_image_url = Storage::url($request->receipt_image_path);
                     }
                 }
+                
+                // Load related data for sales transaction corrections
+                if ($request->request_type === 'Sales Transaction') {
+                    $salesTransaction = SalesTransaction::with('items.product')->find($request->reference_id);
+                    $request->related_data = $salesTransaction ? [
+                        'total_amount' => $salesTransaction->total_amount,
+                        'customer_name' => $salesTransaction->customer_name,
+                        'created_at' => $salesTransaction->created_at,
+                        'items' => $salesTransaction->items->map(function ($item) {
+                            return [
+                                'product_name' => $item->product->name ?? 'N/A',
+                                'quantity' => $item->quantity,
+                                'price' => $item->price,
+                                'subtotal' => $item->quantity * $item->price,
+                            ];
+                        }),
+                    ] : null;
+                }
+                
+                // Load related data for collectibles corrections
+                if ($request->request_type === 'Collectibles') {
+                    $collectible = Collectible::with('salesTransaction')->find($request->reference_id);
+                    $request->related_data = $collectible ? [
+                        'customer_name' => $collectible->customer_name,
+                        'total_amount' => $collectible->total_amount,
+                        'amount_paid' => $collectible->amount_paid,
+                        'balance' => $collectible->balance,
+                        'status' => $collectible->status,
+                        'created_at' => $collectible->created_at,
+                    ] : null;
+                }
+
+                // Load related data for feed usage corrections
+                if ($request->request_type === 'Feed Usage Record') {
+                    $feedLog = FeedUsageLog::with('user')->find($request->reference_id);
+                    $request->related_data = $feedLog ? [
+                        'quantity_kg' => $feedLog->quantity_kg,
+                        'notes' => $feedLog->notes,
+                        'created_at' => $feedLog->created_at,
+                        'recorded_by' => $feedLog->user?->name ?? 'N/A',
+                    ] : null;
+                }
+                
                 return $request;
             });
         
@@ -214,6 +261,132 @@ class ApprovalController extends Controller
                 
                 $expense->save();
                 
+                return true; // Success!
+            
+            case 'Sales Transaction':
+                // Find the original sales transaction that needs to be changed
+                $salesTransaction = SalesTransaction::with('items.product')->find($request->reference_id);
+                if (!$salesTransaction) return false; // The original transaction was deleted
+
+                // Parse the proposed correction format: "sale_item_id:quantity"
+                if (!preg_match('/^(\d+):(\d+)$/', $request->proposed_correction, $matches)) {
+                    return false; // Invalid format
+                }
+                
+                $saleItemId = (int) $matches[1];
+                $newQuantity = (int) $matches[2];
+                
+                // Find the sale item to update
+                $saleItem = $salesTransaction->items->firstWhere('id', $saleItemId);
+                if (!$saleItem) return false; // Sale item not found
+                
+                // Calculate the difference in quantity
+                $quantityDifference = $newQuantity - $saleItem->quantity;
+                
+                // Calculate the old subtotal for this item
+                $oldSubtotal = $saleItem->price * $saleItem->quantity;
+                
+                // Update the sale item quantity
+                $saleItem->quantity = $newQuantity;
+                $saleItem->save();
+                
+                // Calculate the new subtotal for this item
+                $newSubtotal = $saleItem->price * $newQuantity;
+                
+                // Recalculate the total amount: subtract old subtotal, add new subtotal
+                $newTotalAmount = $salesTransaction->total_amount - $oldSubtotal + $newSubtotal;
+                
+                // Update the total amount
+                $salesTransaction->total_amount = $newTotalAmount;
+                $salesTransaction->save();
+                
+                // Adjust inventory: add back the old quantity, subtract the new quantity
+                $product = $saleItem->product;
+                if ($product) {
+                    $product->increment('stock_quantity', -$quantityDifference);
+                }
+
+                return true; // Success!
+            
+            case 'Chicken Stock Adjustment':
+                // For now, chicken stock adjustments would need manual handling
+                // as they involve complex logic with inventory adjustments
+                // This can be implemented later if needed
+                return false;
+
+            case 'Feed Usage Record':
+                $feedLog = FeedUsageLog::find($request->reference_id);
+                if (!$feedLog) return false;
+
+                // Parse the proposed correction to extract the correct quantity (supports decimals)
+                if (!preg_match('/(\d+\.?\d*)/', $request->proposed_correction, $matches)) {
+                    return false;
+                }
+                $newQuantityKg = (float) $matches[1];
+                $originalQuantityKg = (float) $feedLog->quantity_kg;
+
+                if ($newQuantityKg < 0.01) {
+                    return false; // Invalid - minimum quantity
+                }
+
+                // Update the feed usage log
+                $feedLog->quantity_kg = $newQuantityKg;
+                $feedLog->save();
+
+                // Adjust feed stock: stock was reduced by original_quantity, correct reduction is new_quantity
+                // Add back the difference to feed stock
+                $stockAdjustment = $originalQuantityKg - $newQuantityKg;
+                $feedStat = FarmStat::firstWhere('stat_key', 'current_feed_stock_kg');
+                if ($feedStat) {
+                    $feedStat->increment('stat_value', $stockAdjustment);
+                }
+
+                return true;
+            
+            case 'Collectibles':
+                // Find the original collectible that needs to be changed
+                $collectible = Collectible::find($request->reference_id);
+                if (!$collectible) return false; // The original collectible was deleted
+
+                // Parse the proposed correction to extract the amount
+                // The proposed correction should be a number representing the correct amount_paid
+                preg_match('/(\d+\.?\d*)/', $request->proposed_correction, $matches);
+                if (!isset($matches[1])) return false; // Could not find a number in the proposal
+                
+                $newAmountPaid = (float) $matches[1];
+                $totalAmount = $collectible->total_amount;
+                $originalAmountPaid = $collectible->amount_paid;
+                
+                // Ensure the new amount paid doesn't exceed total amount
+                if ($newAmountPaid > $totalAmount) {
+                    return false; // Invalid correction - amount paid cannot exceed total
+                }
+                
+                // Calculate new balance
+                $newBalance = $totalAmount - $newAmountPaid;
+                
+                // Update the collectible
+                $collectible->amount_paid = $newAmountPaid;
+                $collectible->balance = max(0, $newBalance);
+                
+                // Update status based on new values
+                if ($collectible->balance <= 0) {
+                    $collectible->status = 'paid';
+                    $collectible->balance = 0;
+                    if (!$collectible->fully_paid_date) {
+                        $collectible->fully_paid_date = now()->toDateString();
+                    }
+                } else {
+                    $collectible->status = $newAmountPaid > 0 ? 'partial' : 'unpaid';
+                }
+                
+                // Update last payment date if amount paid increased
+                if ($newAmountPaid > $originalAmountPaid) {
+                    $collectible->last_payment_date = now()->toDateString();
+                }
+                
+                $collectible->save();
+
                 return true; // Success!
         }
 

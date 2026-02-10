@@ -10,7 +10,7 @@ The system implements solid security practices with Laravel's built-in protectio
 
 ### 1. **Authentication & Authorization**
 - ✅ Laravel's built-in authentication system
-- ✅ Rate limiting on login (5 attempts)
+- ✅ Rate limiting on login (3 attempts)
 - ✅ Session regeneration on login/logout
 - ✅ Role-based access control via `CheckUserRole` middleware
 - ✅ All routes properly protected with `auth` and `role` middleware

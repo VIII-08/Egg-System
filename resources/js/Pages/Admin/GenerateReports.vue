@@ -105,13 +105,7 @@ const formatCurrency = (value) => `₱${parseFloat(value || 0).toLocaleString('e
                         <tr class="bg-gray-200 font-bold">
                             <th class="border p-2">DAYS</th>
                             <th class="border p-2">HENS</th>
-                            <th class="border p-2">PULLETS</th>
-                            <th class="border p-2">SMALL</th>
-                            <th class="border p-2">MEDIUM</th>
-                            <th class="border p-2">LARGE</th>
-                            <th class="border p-2">X-LARGE</th>
-                            <th class="border p-2">JUMBO</th>
-                            <th class="border p-2">DAMAGED</th>
+                            <th v-for="colName in reportData.columnNames" :key="colName" class="border p-2">{{ colName }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -120,13 +114,9 @@ const formatCurrency = (value) => `₱${parseFloat(value || 0).toLocaleString('e
                             class="border-b">
                             <td class="border p-2 text-center">{{ item.day }}</td>
                             <td class="border p-2 text-center">{{ item.hens !== '' && item.hens !== null ? item.hens : '' }}</td>
-                            <td class="border p-2 text-center">{{ item.PULLETS || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item.SMALL || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item.MEDIUM || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item.LARGE || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item['X-LARGE'] || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item.JUMBO || 0 }}</td>
-                            <td class="border p-2 text-center">{{ item.DAMAGED || 0 }}</td>
+                            <td v-for="colName in reportData.columnNames" :key="colName" class="border p-2 text-center">
+                                {{ item[colName] || 0 }}
+                            </td>
                         </tr>
                     </tbody>
                 </table>

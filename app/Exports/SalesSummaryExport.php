@@ -41,9 +41,9 @@ class SalesSummaryExport implements FromCollection, WithHeadings, WithCustomStar
         $startDate = Carbon::parse($this->startDate);
         $endDate = Carbon::parse($this->endDate);
         
-        // Get egg products in the correct order (excluding DAMAGED and BROKEN EGGS)
+        // Get egg products in the correct order (excluding DAMAGED EGGS)
         $eggProducts = \App\Models\EggProduct::where('name', '!=', 'DAMAGED')
-            ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+            ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
             ->orderByRaw("CASE 
                 WHEN name = 'SMALL' THEN 1
                 WHEN name = 'MEDIUM' THEN 2
@@ -148,7 +148,7 @@ class SalesSummaryExport implements FromCollection, WithHeadings, WithCustomStar
     public function headings(): array
     {
         $eggProducts = \App\Models\EggProduct::where('name', '!=', 'DAMAGED')
-            ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+            ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
             ->orderByRaw("CASE 
                 WHEN name = 'SMALL' THEN 1
                 WHEN name = 'MEDIUM' THEN 2
@@ -175,7 +175,7 @@ class SalesSummaryExport implements FromCollection, WithHeadings, WithCustomStar
         
         // Get egg products in the correct order
         $eggProducts = \App\Models\EggProduct::where('name', '!=', 'DAMAGED')
-            ->whereRaw('LOWER(name) != ?', ['broken eggs'])
+            ->whereRaw('LOWER(name) != ?', ['damaged eggs'])
             ->orderByRaw("CASE 
                 WHEN name = 'SMALL' THEN 1
                 WHEN name = 'MEDIUM' THEN 2

@@ -13,6 +13,7 @@ use App\Models\FinancialReport;
 use App\Models\SaleItem;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Collection;
 
 class AdminDashboardController extends Controller
 {
@@ -30,7 +31,8 @@ class AdminDashboardController extends Controller
         $pendingApprovalsCount = $correctionRequests + $financialReports;
         
         // --- Pie Chart Data: Inventory by Egg Size ---
-        $pieChartData = EggProduct::where('name', '!=', 'Broken Eggs')
+        // Show all egg products in the pie chart (including damaged eggs)
+        $pieChartData = EggProduct::orderBy('name')
             ->get(['name', 'stock_quantity'])
             ->map(fn($p) => ['label' => $p->name, 'value' => $p->stock_quantity]);
         
@@ -39,7 +41,7 @@ class AdminDashboardController extends Controller
         $latestExpenses = Expense::with('user')->latest()->limit(2)->get();
         $latestProduction = ProductionLog::with(['user', 'eggProduct'])->latest()->limit(2)->get();
         $latestAuditLogs = AuditLog::with('user')
-            ->whereIn('action', ['egg_product_created', 'egg_product_deleted', 'expense_category_created', 'expense_category_deleted'])
+            ->whereIn('action', ['egg_product_created', 'egg_product_deleted', 'expense_category_created', 'expense_category_updated', 'expense_category_deleted'])
             ->latest()
             ->limit(3)
             ->get();
@@ -96,7 +98,35 @@ class AdminDashboardController extends Controller
             'recentActivity' => $activity->values(), 
             'inventoryStatusData' => $inventoryStatusData,
             'salesVsForecastChart' => $salesVsForecastChart,
+            'todayProductionBatches' => $this->buildTodayProductionBatches(),
         ]);
+    }
+
+    private function buildTodayProductionBatches(): array
+    {
+        $logs = ProductionLog::with(['eggProduct', 'user'])
+            ->whereDate('log_date', today())
+            ->whereNotNull('batch_reference')
+            ->orderByDesc('created_at')
+            ->get()
+            ->groupBy('batch_reference');
+
+        return $logs->map(function (Collection $batchLogs, string $batchReference) {
+            $first = $batchLogs->first();
+
+            return [
+                'batch_reference' => $batchReference,
+                'created_at' => $first?->created_at,
+                'logged_by' => $first?->user?->name,
+                'total_quantity' => $batchLogs->sum('quantity'),
+                'items' => $batchLogs->map(function ($log) {
+                    return [
+                        'egg_size' => $log->eggProduct->name ?? 'Unknown',
+                        'quantity' => (int) $log->quantity,
+                    ];
+                })->values(),
+            ];
+        })->values()->all();
     }
 
     private function buildSalesVsForecastChart(): ?array

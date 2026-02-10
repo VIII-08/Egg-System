@@ -16,11 +16,28 @@ const props = defineProps({
 });
 
 const showAddForm = ref(false);
+const editingCategory = ref(null);
 
 const addForm = useForm({
     category: '',
     role: props.selectedRole !== 'all' ? props.selectedRole : 'staff-production',
 });
+
+const editForm = useForm({
+    category: '',
+    role: '',
+});
+
+const startEdit = (category) => {
+    editingCategory.value = category.id;
+    editForm.category = category.name;
+    editForm.role = category.role;
+};
+
+const cancelEdit = () => {
+    editingCategory.value = null;
+    editForm.reset();
+};
 
 const submitAdd = () => {
     addForm.post(route('admin.expense-categories.store'), {
@@ -36,11 +53,37 @@ const submitAdd = () => {
             addForm.reset();
             showAddForm.value = false;
         },
-        onError: () => {
+        onError: (errors) => {
+            const msg = errors.category || errors.role;
             Swal.fire({
                 icon: 'error',
-                title: 'Error',
-                text: 'Failed to add category. Please check the form for errors.',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Failed to add category. Please check your input.',
+            });
+        },
+    });
+};
+
+const submitEdit = (categoryId) => {
+    editForm.put(route('admin.expense-categories.update', categoryId), {
+        preserveScroll: true,
+        onSuccess: () => {
+            Swal.fire({
+                icon: 'success',
+                title: 'Category Updated!',
+                text: 'The expense category has been updated successfully.',
+                timer: 2000,
+                showConfirmButton: false,
+            });
+            editingCategory.value = null;
+            editForm.reset();
+        },
+        onError: (errors) => {
+            const msg = errors.category || errors.role;
+            Swal.fire({
+                icon: 'error',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Failed to update category. Please check your input.',
             });
         },
     });
@@ -133,9 +176,6 @@ const submitDelete = (category) => {
                                 placeholder="e.g., Feeds, Electricity"
                                 required
                             />
-                            <div v-if="addForm.errors.category" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.category }}
-                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">For Role</label>
@@ -147,9 +187,6 @@ const submitDelete = (category) => {
                                 <option value="staff-production">Production Staff</option>
                                 <option value="staff-marketing">Marketing Staff</option>
                             </select>
-                            <div v-if="addForm.errors.role" class="text-red-600 text-sm mt-1">
-                                {{ addForm.errors.role }}
-                            </div>
                         </div>
                         <div class="flex items-end">
                             <button
@@ -184,16 +221,50 @@ const submitDelete = (category) => {
                         </thead>
                         <tbody class="divide-y">
                             <tr v-for="category in categories" :key="category.id">
-                                <td class="px-4 py-3 text-gray-800 font-medium">{{ category.name }}</td>
+                                <td class="px-4 py-3">
+                                    <div v-if="editingCategory !== category.id" class="text-gray-800 font-medium">
+                                        {{ category.name }}
+                                    </div>
+                                    <input
+                                        v-else
+                                        v-model="editForm.category"
+                                        type="text"
+                                        class="w-full rounded-md border-gray-300"
+                                        required
+                                    />
+                                </td>
                                 <td class="px-4 py-3 text-gray-600">{{ category.usage_count }} expense(s)</td>
                                 <td class="px-4 py-3 text-right">
-                                    <button
-                                        @click="confirmDelete(category)"
-                                        :disabled="category.usage_count > 0"
-                                        class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        Delete
-                                    </button>
+                                    <div v-if="editingCategory !== category.id" class="flex justify-end gap-2">
+                                        <button
+                                            @click="startEdit(category)"
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(category)"
+                                            :disabled="category.usage_count > 0"
+                                            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <div v-else class="flex justify-end gap-2">
+                                        <button
+                                            @click="submitEdit(category.id)"
+                                            :disabled="editForm.processing"
+                                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                        >
+                                            Save
+                                        </button>
+                                        <button
+                                            @click="cancelEdit"
+                                            class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>

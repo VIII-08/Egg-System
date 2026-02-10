@@ -82,8 +82,13 @@ const saveUser = () => {
                 showConfirmButton: false,
             });
         },
-        onError: () => {
-             // We don't need a Swal error here because the individual error messages will appear.
+        onError: (errors) => {
+            const msg = errors.name || errors.email || errors.role || errors.profile_picture || errors.password;
+            Swal.fire({
+                icon: 'error',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Please check your input.',
+            });
         },
         preserveScroll: false, // Force page refresh to show updated profile picture
     };
@@ -211,9 +216,6 @@ const getUserStatus = (user) => {
                                 placeholder="Enter full name"
                                 required
                             >
-                            <div v-if="form.errors.name" class="text-sm text-red-600 mt-1 flex items-center">
-                                <span class="mr-1">⚠️</span> {{ form.errors.name }}
-                            </div>
                         </div>
 
                         <!-- Email Address -->
@@ -228,9 +230,6 @@ const getUserStatus = (user) => {
                                 placeholder="user@example.com"
                                 required
                             >
-                            <div v-if="form.errors.email" class="text-sm text-red-600 mt-1 flex items-center">
-                                <span class="mr-1">⚠️</span> {{ form.errors.email }}
-                            </div>
                         </div>
 
                         <!-- Role and Status Row -->
@@ -245,14 +244,11 @@ const getUserStatus = (user) => {
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition bg-white"
                                     :disabled="isEditMode && selectedUser?.role === 'admin'"
                                 >
-                                    <option value="admin">Admin</option>
+                                    <option v-if="isEditMode && selectedUser?.role === 'admin'" value="admin">Admin</option>
                                     <option value="staff-production">Staff Production</option>
                                     <option value="staff-marketing">Staff Marketing</option>
                                     <option value="treasurer">Treasurer</option>
                                 </select>
-                                <div v-if="form.errors.role" class="text-sm text-red-600 mt-1 flex items-center">
-                                    <span class="mr-1">⚠️</span> {{ form.errors.role }}
-                                </div>
                             </div>
 
                             <!-- Status (Edit Mode Only) -->
@@ -293,9 +289,6 @@ const getUserStatus = (user) => {
                                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition text-sm"
                                     >
                                     <p class="text-xs text-gray-500 mt-1">Accepted formats: JPEG, PNG, JPG, GIF. Max size: 2MB</p>
-                                    <div v-if="form.errors.profile_picture" class="text-sm text-red-600 mt-1 flex items-center">
-                                        <span class="mr-1">⚠️</span> {{ form.errors.profile_picture }}
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -315,9 +308,6 @@ const getUserStatus = (user) => {
                                     :placeholder="isEditMode ? 'Leave blank to keep current' : 'Enter password'"
                                     :required="!isEditMode"
                                 >
-                                <div v-if="form.errors.password" class="text-sm text-red-600 mt-1 flex items-center">
-                                    <span class="mr-1">⚠️</span> {{ form.errors.password }}
-                                </div>
                             </div>
 
                             <!-- Confirm Password -->

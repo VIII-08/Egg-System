@@ -20,6 +20,7 @@ class ProductionLog extends Model
         'egg_product_id',
         'quantity',
         'log_date',
+        'batch_reference',
     ];
 
     /**

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Head, useForm } from '@inertiajs/vue3';
 import StaffLayout from '@/Layouts/StaffLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -13,17 +13,35 @@ const props = defineProps({
 const selectedProduct = ref(null);
 const currentQuantity = ref('');
 const cart = ref([]);
+const paymentType = ref('pay_now'); // 'pay_now' or 'collectible'
 
 // The main form that will be sent to the backend
 const form = useForm({
     customer_name: '',
     items: [],
+    amount_paid_now: '',
 });
 
 // --- Computed Properties for Live Totals ---
 const subtotal = computed(() => cart.value.reduce((acc, item) => acc + (item.price * item.quantity), 0));
 const tax = computed(() => 0); // As per design, tax is 0
 const totalAmount = computed(() => subtotal.value + tax.value);
+
+// Watch payment type and auto-fill amount
+watch(paymentType, (newType) => {
+    if (newType === 'pay_now' && totalAmount.value > 0) {
+        form.amount_paid_now = totalAmount.value.toFixed(2);
+    } else if (newType === 'collectible') {
+        form.amount_paid_now = '0';
+    }
+});
+
+// Watch total amount and update if pay_now is selected
+watch(totalAmount, (newTotal) => {
+    if (paymentType.value === 'pay_now' && newTotal > 0) {
+        form.amount_paid_now = newTotal.toFixed(2);
+    }
+});
 
 // --- Methods for POS interactivity ---
 function selectProductForSale(product) {
@@ -97,11 +115,13 @@ function completeSale() {
         return;
     }
     
-    if (cart.value.length === 0) {
+    // Validate amount paid doesn't exceed total
+    const amountPaid = parseFloat(form.amount_paid_now || 0);
+    if (amountPaid > totalAmount.value) {
         Swal.fire({
             icon: 'error',
-            title: 'Empty Sale',
-            text: 'You cannot complete a sale with no items in the cart.',
+            title: 'Invalid Amount',
+            text: `Amount paid (₱${amountPaid.toFixed(2)}) cannot exceed total amount (₱${totalAmount.value.toFixed(2)}).`,
         });
         return;
     }
@@ -118,11 +138,24 @@ function completeSale() {
     }).then((result) => {
         if (result.isConfirmed) {
             form.items = cart.value.map(item => ({ id: item.id, quantity: item.quantity }));
+            
+            // Handle payment based on payment type
+            if (paymentType.value === 'pay_now') {
+                // Full payment - use total amount
+                form.amount_paid_now = totalAmount.value.toFixed(2);
+            } else if (paymentType.value === 'collectible') {
+                // Collectible - use entered amount (defaults to 0 if empty)
+                if (!form.amount_paid_now || form.amount_paid_now === '') {
+                    form.amount_paid_now = '0';
+                }
+            }
     
             form.post(route('sales.store'), {
                 onSuccess: () => {
                     cart.value = [];
                     form.reset();
+                    form.amount_paid_now = '';
+                    paymentType.value = 'pay_now';
                     Swal.fire({
                         icon: 'success',
                         title: 'Sale Completed!',
@@ -132,11 +165,11 @@ function completeSale() {
                     });
                 },
                 onError: (errors) => {
+                    const msg = errors.items;
                     Swal.fire({
                         icon: 'error',
                         title: 'Sale Failed',
-                        // Display the specific stock error from the server if it exists
-                        text: errors.items || 'An error occurred. Please check stock and try again.',
+                        text: Array.isArray(msg) ? msg[0] : msg || 'An error occurred. Please check stock and try again.',
                     });
                 }
             });
@@ -154,10 +187,6 @@ function completeSale() {
          <!-- Success Message -->
         <div v-if="$page.props.flash && $page.props.flash.success" class="mb-4 bg-green-100 border-green-400 text-green-700 px-4 py-3 rounded-lg" role="alert">
             <span>{{ $page.props.flash.success }}</span>
-        </div>
-         <!-- General Error Message for Stock -->
-         <div v-if="form.errors.items" class="mb-4 bg-red-100 border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert">
-            <span>{{ form.errors.items }}</span>
         </div>
         
         <div class="flex flex-col lg:flex-row gap-6">
@@ -199,6 +228,40 @@ function completeSale() {
                         <label class="block text-sm font-medium text-gray-700">Customer Name</label>
                         <input v-model="form.customer_name" type="text" placeholder="e.g., John Dela Cruz" class="mt-1 block w-full rounded-md border-gray-300">
                      </div>
+                     
+                     <!-- Payment Type Selector -->
+                     <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Payment Type</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" v-model="paymentType" value="pay_now" class="form-radio text-green-600">
+                                <span class="ml-2 font-semibold text-gray-700">Pay Now (Full Payment)</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" v-model="paymentType" value="collectible" class="form-radio text-orange-600">
+                                <span class="ml-2 font-semibold text-gray-700">Collectible (Credit/Utang)</span>
+                            </label>
+                        </div>
+                     </div>
+                     
+                     <!-- Amount Paid Now (conditional display) -->
+                     <div v-if="paymentType === 'pay_now'">
+                        <label class="block text-sm font-medium text-gray-700">Amount Paid</label>
+                        <input v-model="form.amount_paid_now" type="number" min="0" step="0.01" :max="totalAmount" class="mt-1 block w-full rounded-md border-gray-300 bg-green-50" readonly>
+                        <p class="text-xs text-green-600 mt-1">✓ Full payment: ₱{{ totalAmount.toFixed(2) }}</p>
+                     </div>
+                     
+                     <div v-if="paymentType === 'collectible'">
+                        <label class="block text-sm font-medium text-gray-700">Amount Paid Now (Optional Partial Payment)</label>
+                        <input v-model="form.amount_paid_now" type="number" min="0" step="0.01" :max="totalAmount" :placeholder="`Enter 0 for full credit, or partial amount up to ₱${totalAmount.toFixed(2)}`" class="mt-1 block w-full rounded-md border-gray-300">
+                        <p class="text-xs text-orange-600 mt-1">
+                            <span v-if="form.amount_paid_now && parseFloat(form.amount_paid_now) > 0">
+                                Partial payment: ₱{{ parseFloat(form.amount_paid_now || 0).toFixed(2) }} | Remaining: ₱{{ (totalAmount - parseFloat(form.amount_paid_now || 0)).toFixed(2) }}
+                            </span>
+                            <span v-else>Full credit/utang: ₱{{ totalAmount.toFixed(2) }} will be added to collectibles</span>
+                        </p>
+                     </div>
+                     
                      <div>
                         <label class="block text-sm font-medium text-gray-700">Date of Sale</label>
                         <input type="text" :value="new Date().toLocaleString()" disabled class="mt-1 block w-full rounded-md border-gray-300 bg-gray-100">

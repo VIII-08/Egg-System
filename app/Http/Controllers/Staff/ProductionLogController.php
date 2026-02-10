@@ -9,6 +9,7 @@ use App\Models\ProductionLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Str;
 
 class ProductionLogController extends Controller
 {
@@ -38,15 +39,25 @@ class ProductionLogController extends Controller
 {
     // Validate the incoming data, including our new field
     $validated = $request->validate([
-        'collection_date' => ['required', 'date'],
+        'collection_date' => [
+            'required', 
+            'date',
+            function ($attribute, $value, $fail) {
+                if ($value !== now()->format('Y-m-d')) {
+                    $fail('You can only log production for today\'s date.');
+                }
+            },
+        ],
         'quantities' => ['required', 'array'],
         'quantities.*' => ['nullable', 'integer', 'min:0'],
         'broken_quantity' => ['nullable', 'integer', 'min:0'], // <-- Add validation
         'notes' => ['nullable', 'string', 'max:255'],
     ]);
 
+    $batchReference = (string) Str::uuid();
+
     // Use a database transaction for data integrity
-    DB::transaction(function () use ($validated, $request) {
+    DB::transaction(function () use ($validated, $request, $batchReference) {
         // -- Process the main grid of sellable eggs --
         foreach ($validated['quantities'] as $productId => $quantity) {
             if ($quantity > 0) {
@@ -55,30 +66,35 @@ class ProductionLogController extends Controller
                     'egg_product_id' => $productId,
                     'quantity' => $quantity,
                     'log_date' => $validated['collection_date'],
+                    'batch_reference' => $batchReference,
                 ]);
                 // Update the inventory stock for sellable eggs
                 EggProduct::find($productId)->increment('stock_quantity', $quantity);
             }
         }
 
-        // -- Process the broken eggs separately --
+        // -- Process the damaged eggs separately --
         if (!empty($validated['broken_quantity']) && $validated['broken_quantity'] > 0) {
-            // Find the "Broken Eggs" product record
-            $brokenEggProduct = EggProduct::where('name', 'Broken Eggs')->first();
-            if ($brokenEggProduct) {
+            // Find the "Damaged Eggs" or "Damage Eggs" product record (case-insensitive)
+            $damagedEggProduct = EggProduct::where(function($query) {
+                $query->whereRaw('LOWER(name) = ?', ['damaged eggs'])
+                      ->orWhereRaw('LOWER(name) = ?', ['damage eggs']);
+            })->first();
+            if ($damagedEggProduct) {
                 ProductionLog::create([
                     'user_id' => $request->user()->id,
-                    'egg_product_id' => $brokenEggProduct->id,
+                    'egg_product_id' => $damagedEggProduct->id,
                     'quantity' => $validated['broken_quantity'],
                     'log_date' => $validated['collection_date'],
+                    'batch_reference' => $batchReference,
                 ]);
-                // You might choose to increment stock for broken eggs if you track them
+                // You might choose to increment stock for damaged eggs if you track them
                 // or do nothing if they are simply discarded. For now, we'll log them.
-                $brokenEggProduct->increment('stock_quantity', $validated['broken_quantity']);
+                $damagedEggProduct->increment('stock_quantity', $validated['broken_quantity']);
             }
         }
     });
 
-    return to_route('production.logs.create')->with('success', 'Production batch, including broken eggs, logged successfully!');
+    return to_route('production.logs.create')->with('success', 'Production batch, including damaged eggs, logged successfully!');
 }
 }

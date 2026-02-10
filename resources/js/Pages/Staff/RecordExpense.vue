@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { ref, computed, watch } from 'vue';
+import { Head, useForm, usePage } from '@inertiajs/vue3';
 import StaffLayout from '@/Layouts/StaffLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import Swal from 'sweetalert2';
@@ -15,9 +15,20 @@ const props = defineProps({
 const form = useForm({
     expense_date: new Date().toISOString().slice(0, 10),
     category: null,
+    feed_quantity_kg: null,
     amount: null,
     description: '',
     receipt_image: null, // This will hold the file object
+});
+
+// Computed property to check if Feeds category is selected
+const isFeedsCategory = computed(() => form.category === 'Feeds');
+
+// Watch for category changes and reset feed_quantity_kg if not Feeds
+watch(() => form.category, (newCategory) => {
+    if (newCategory !== 'Feeds') {
+        form.feed_quantity_kg = null;
+    }
 });
 
 const receiptPreview = ref(null);
@@ -76,15 +87,28 @@ const submit = () => {
     }
 
     form.post(route('expenses.store'), {
+        onError: (errors) => {
+            const msg = errors.expense_date || errors.category || errors.feed_quantity_kg || errors.amount || errors.receipt_image;
+            Swal.fire({
+                icon: 'error',
+                title: 'Validation Error',
+                text: Array.isArray(msg) ? msg[0] : msg || 'Please check your input.',
+            });
+        },
         onSuccess: () => {
             form.reset();
             receiptPreview.value = null;
 
+            const feedAddedKg = usePage().props.flash?.feed_added_kg;
+            const successText = feedAddedKg
+                ? `Your expense has been logged. ${parseFloat(feedAddedKg).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg of feed has been added to inventory.`
+                : 'Your expense has been successfully logged.';
+
             Swal.fire({
                 icon: 'success',
-                title: 'Expense Recorded!',
-                text: 'Your expense has been successfully logged.',
-                timer: 2000,
+                title: feedAddedKg ? 'Expense & Feed Recorded!' : 'Expense Recorded!',
+                text: successText,
+                timer: feedAddedKg ? 3500 : 2000,
                 showConfirmButton: false,
             });
         }
@@ -114,7 +138,6 @@ const submit = () => {
                     <div>
                         <label for="expense_date" class="block text-sm font-medium text-gray-700">Date of Expense</label>
                         <input v-model="form.expense_date" type="date" id="expense_date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
-                         <div v-if="form.errors.expense_date" class="text-sm text-red-600 mt-1">{{ form.errors.expense_date }}</div>
                     </div>
 
                     <div>
@@ -123,7 +146,24 @@ const submit = () => {
                             <option :value="null" disabled>Select a category...</option>
                             <option v-for="cat in expenseCategories" :key="cat" :value="cat">{{ cat }}</option>
                         </select>
-                         <div v-if="form.errors.category" class="text-sm text-red-600 mt-1">{{ form.errors.category }}</div>
+                    </div>
+
+                    <div v-if="isFeedsCategory">
+                        <label for="feed_quantity_kg" class="block text-sm font-medium text-gray-700">Feed Quantity (kg)</label>
+                        <div class="relative mt-1">
+                            <input 
+                                v-model="form.feed_quantity_kg" 
+                                type="number" 
+                                step="0.01" 
+                                id="feed_quantity_kg" 
+                                class="block w-full rounded-md border-gray-300 pr-12 shadow-sm focus:border-green-500 focus:ring-green-500" 
+                                placeholder="0.00"
+                                min="0"
+                            >
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                <span class="text-gray-500 text-sm">kg</span>
+                            </div>
+                        </div>
                     </div>
 
                     <div>
@@ -134,7 +174,6 @@ const submit = () => {
                             </div>
                             <input v-model="form.amount" type="number" step="0.01" id="amount" class="block w-full rounded-md border-gray-300 pl-7 shadow-sm focus:border-green-500 focus:ring-green-500" placeholder="0.00">
                          </div>
-                         <div v-if="form.errors.amount" class="text-sm text-red-600 mt-1">{{ form.errors.amount }}</div>
                     </div>
 
                     <div>
@@ -158,7 +197,6 @@ const submit = () => {
                                 <p class="text-xs text-gray-500">PNG, JPG, GIF up to 2MB</p>
                             </div>
                         </div>
-                        <div v-if="form.errors.receipt_image" class="text-sm text-red-600 mt-1">{{ form.errors.receipt_image }}</div>
                     </div>
 
                      <div class="mt-6">

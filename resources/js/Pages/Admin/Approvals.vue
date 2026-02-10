@@ -424,6 +424,30 @@ const processApproval = (action) => {
                                         <p class="text-xs text-gray-500 mt-1">This image will replace the current receipt image when approved.</p>
                                     </div>
                                 </div>
+
+                                <!-- Show current feed usage data if available -->
+                                <div v-if="selectedRequest.related_data && approvalForm.type === 'correction' && selectedRequest.request_type === 'Feed Usage Record'" class="mt-4 pt-4 border-t border-blue-200">
+                                    <p class="font-semibold text-blue-900 mb-2">Current Feed Usage Data:</p>
+                                    <div class="grid grid-cols-2 gap-2 text-sm">
+                                        <div>
+                                            <span class="font-medium">Quantity (kg):</span> 
+                                            <span class="ml-1 font-bold text-red-600">{{ parseFloat(selectedRequest.related_data.quantity_kg || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} kg</span>
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Recorded By:</span> 
+                                            <span class="ml-1">{{ selectedRequest.related_data.recorded_by || 'N/A' }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Date:</span> 
+                                            <span class="ml-1">{{ selectedRequest.related_data.created_at ? new Date(selectedRequest.related_data.created_at).toLocaleString() : 'N/A' }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="font-medium">Notes:</span> 
+                                            <span class="ml-1">{{ selectedRequest.related_data.notes || '—' }}</span>
+                                        </div>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mt-2">Proposed correction will update the kg value and adjust feed stock accordingly.</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -433,11 +457,11 @@ const processApproval = (action) => {
                         <div class="bg-gradient-to-r from-blue-50 to-blue-100 border-l-4 border-blue-500 p-5 rounded-r-lg">
                             <div class="flex items-center justify-between mb-4">
                                 <h3 class="font-bold text-blue-900 text-lg flex items-center gap-2">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                    </svg>
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
                                     Financial Summary Preview
-                                </h3>
+                            </h3>
                                 <button 
                                     @click="openFullReportModal(selectedRequest)"
                                     class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition duration-200 flex items-center gap-2"

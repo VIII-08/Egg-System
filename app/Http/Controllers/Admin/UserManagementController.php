@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\AuditLog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -72,7 +73,15 @@ class UserManagementController extends Controller
             $userData['profile_picture'] = 'data:' . $mimeType . ';base64,' . $base64;
         }
 
-        User::create($userData);
+        $newUser = User::create($userData);
+
+        // Log user creation
+        $adminName = Auth::user()->name;
+        AuditLog::createWithRequest([
+            'user_id' => Auth::id(),
+            'action' => 'user_created',
+            'log_entry' => "`{$adminName}` created a new user account: `{$newUser->name}` ({$newUser->email}) with role `{$newUser->role}`.",
+        ], $request);
 
         return to_route('admin.users.index')->with('success', 'User created successfully.');
     }
@@ -93,6 +102,11 @@ class UserManagementController extends Controller
             'password' => ['nullable', 'confirmed', Rules\Password::defaults()],
             'profile_picture' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif', 'max:2048'],
         ]);
+
+        // Prevent changing a non-admin user's role to admin (only one admin allowed)
+        if ($request->role === 'admin' && $user->role !== 'admin') {
+            return back()->with('error', 'Cannot change user role to admin. Only one admin account is allowed in the system.');
+        }
 
         $user->name = $request->name;
         $user->email = $request->email;
@@ -116,10 +130,47 @@ class UserManagementController extends Controller
             $user->profile_picture = 'data:' . $mimeType . ';base64,' . $base64;
         }
 
+        $oldName = $user->name;
+        $oldEmail = $user->email;
+        $oldRole = $user->role;
+        $oldIsActive = $user->is_active;
+
         $user->save();
         
         // Refresh the user data to ensure profile_picture is included
         $user->refresh();
+        
+        // Build log entry for changes
+        $changes = [];
+        if ($oldName !== $user->name) {
+            $changes[] = "name from `{$oldName}` to `{$user->name}`";
+        }
+        if ($oldEmail !== $user->email) {
+            $changes[] = "email from `{$oldEmail}` to `{$user->email}`";
+        }
+        if ($oldRole !== $user->role) {
+            $changes[] = "role from `{$oldRole}` to `{$user->role}`";
+        }
+        if ($oldIsActive !== $user->is_active) {
+            $status = $user->is_active ? 'activated' : 'deactivated';
+            $changes[] = "account {$status}";
+        }
+        if ($request->filled('password')) {
+            $changes[] = "password changed";
+        }
+        if ($request->hasFile('profile_picture')) {
+            $changes[] = "profile picture updated";
+        }
+        
+        if (!empty($changes)) {
+            $adminName = Auth::user()->name;
+            $changesText = implode(', ', $changes);
+            AuditLog::createWithRequest([
+                'user_id' => Auth::id(),
+                'action' => 'user_updated',
+                'log_entry' => "`{$adminName}` updated user `{$user->name}`: {$changesText}.",
+            ], $request);
+        }
         
         return to_route('admin.users.index')->with('success', 'User updated successfully.');
     }
@@ -136,7 +187,21 @@ class UserManagementController extends Controller
         if ($user->role === 'admin' || $user->id === Auth::id()) {
              return back()->with('error', 'Cannot delete an administrator or yourself.');
         }
+        
+        $userName = $user->name;
+        $userEmail = $user->email;
+        $userRole = $user->role;
+        
         $user->delete();
+        
+        // Log user deletion
+        $adminName = Auth::user()->name;
+        AuditLog::createWithRequest([
+            'user_id' => Auth::id(),
+            'action' => 'user_deleted',
+            'log_entry' => "`{$adminName}` deleted user account: `{$userName}` ({$userEmail}) with role `{$userRole}`.",
+        ], request());
+        
         return to_route('admin.users.index')->with('success', 'User deleted successfully.');
     }
 }

@@ -4,9 +4,10 @@ namespace App\Http\Controllers\Staff;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\ProductionLog; // Use our new model
-
-use Illuminate\Support\Facades\Auth; // To get the logged-in user
+use App\Models\ProductionLog;
+use App\Models\FarmStat;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 class ProductionDashboardController extends Controller
 {
@@ -34,14 +35,20 @@ class ProductionDashboardController extends Controller
                                                   ->with('eggProduct') // Eager load the product name
                                                   ->get();
     
-        // --- Metric: Broken Eggs Today ---
+        // --- Metric: Damaged Eggs Today ---
         $brokenEggsToday = ProductionLog::query()
                                                 ->where('user_id', $user->id)
                                                 ->whereDate('log_date', today())
                                                 ->whereHas('eggProduct', function ($query) {
-                                                    $query->where('name', 'Broken Eggs');
+                                                    $query->where('name', 'Damaged Eggs');
                                                 })
                                                 ->sum('quantity');
+
+        // Get today's production batches for this user
+        $todayProductionBatches = $this->buildTodayProductionBatches($user->id);
+
+        // Current feed stock for production staff
+        $currentFeedStock = (float) (FarmStat::where('stat_key', 'current_feed_stock_kg')->value('stat_value') ?? 0);
 
         // Pass all the metrics to the Vue component
         return inertia('Staff/ProductionDashboard', [
@@ -50,6 +57,50 @@ class ProductionDashboardController extends Controller
             'brokenEggsToday' => (int) $brokenEggsToday,
             'expensesToday' => (float) $expensesToday,
             'recentActivities' => $recentActivities,
+            'todayProductionBatches' => $todayProductionBatches,
+            'currentFeedStock' => $currentFeedStock,
         ]);
+    }
+
+    /**
+     * Build today's production batches for a specific user
+     */
+    private function buildTodayProductionBatches(int $userId): array
+    {
+        // Get all logs for today (check both log_date and created_at to catch all cases)
+        $logs = ProductionLog::with(['eggProduct', 'user'])
+            ->where('user_id', $userId)
+            ->where(function($query) {
+                $query->whereDate('log_date', today())
+                      ->orWhereDate('created_at', today());
+            })
+            ->whereNotNull('batch_reference')
+            ->orderByDesc('created_at')
+            ->get();
+
+        // If no logs with batch_reference, return empty array
+        if ($logs->isEmpty()) {
+            return [];
+        }
+
+        // Group by batch_reference
+        $grouped = $logs->groupBy('batch_reference');
+
+        return $grouped->map(function (Collection $batchLogs, string $batchReference) {
+            $first = $batchLogs->first();
+
+            return [
+                'batch_reference' => $batchReference,
+                'created_at' => $first?->created_at,
+                'logged_by' => $first?->user?->name ?? 'Unknown',
+                'total_quantity' => $batchLogs->sum('quantity'),
+                'items' => $batchLogs->map(function ($log) {
+                    return [
+                        'egg_size' => $log->eggProduct->name ?? 'Unknown',
+                        'quantity' => (int) $log->quantity,
+                    ];
+                })->values(),
+            ];
+        })->values()->all();
     }
 }
