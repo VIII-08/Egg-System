@@ -5,6 +5,7 @@ namespace App\Exports;
 use App\Models\ProductionLog;
 use App\Models\ChickenStockLog;
 use App\Models\FarmStat;
+use App\Models\EggProduct;
 use Carbon\Carbon;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
@@ -14,16 +15,66 @@ use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 
 class InventoryReportExport implements FromCollection, WithHeadings, WithCustomStartCell, WithStyles, ShouldAutoSize
 {
     protected $startDate;
     protected $endDate;
 
+    /** @var array<int, string> Cached column names from DB (e.g. PULLETS, SMALL, LARGE) */
+    protected $columnNames = [];
+
+    /** @var array<string, string> Map uppercase product name -> column name */
+    protected $eggSizeMap = [];
+
+    /** @var bool Whether buildMappings() has already run */
+    protected $mappingsBuilt = false;
+
     public function __construct(string $startDate, string $endDate)
     {
         $this->startDate = $startDate;
         $this->endDate = $endDate;
+    }
+
+    /**
+     * Build column names and egg size map from current egg_products (so renames don't break the report).
+     */
+    protected function buildMappings(): void
+    {
+        if ($this->mappingsBuilt) {
+            return;
+        }
+        $this->mappingsBuilt = true;
+        $allEggProducts = EggProduct::whereRaw('LOWER(name) != ?', ['damaged eggs'])
+            ->orderByRaw("CASE 
+                WHEN name = 'SMALL' THEN 1
+                WHEN name = 'MEDIUM' THEN 2
+                WHEN name = 'LARGE' THEN 3
+                WHEN name = 'X-LARGE' THEN 4
+                WHEN name = 'XL' THEN 4
+                WHEN name = 'JUMBO' THEN 5
+                WHEN name = 'PULLETS' THEN 6
+                ELSE 7
+            END")
+            ->get();
+        $damagedProduct = EggProduct::whereRaw('LOWER(name) LIKE ?', ['%damage%'])->first();
+
+        foreach ($allEggProducts as $product) {
+            $productNameUpper = strtoupper($product->name);
+            $columnName = in_array($productNameUpper, ['XL', 'X-LARGE']) ? 'X-LARGE' : $productNameUpper;
+            $this->eggSizeMap[$productNameUpper] = $columnName;
+            if (!in_array($columnName, $this->columnNames)) {
+                $this->columnNames[] = $columnName;
+            }
+        }
+        if ($damagedProduct) {
+            $damagedNameUpper = strtoupper($damagedProduct->name);
+            $this->eggSizeMap[$damagedNameUpper] = $damagedNameUpper;
+            if (!in_array($damagedNameUpper, $this->columnNames)) {
+                $this->columnNames[] = $damagedNameUpper;
+            }
+        }
     }
 
     /**
@@ -39,21 +90,18 @@ class InventoryReportExport implements FromCollection, WithHeadings, WithCustomS
      */
     public function collection()
     {
+        $this->buildMappings();
         $startDate = Carbon::parse($this->startDate);
         $endDate = Carbon::parse($this->endDate);
-        
-        // Get all production logs in the date range
+
         $productionLogs = ProductionLog::with('eggProduct')
             ->whereBetween('log_date', [$startDate, $endDate])
             ->get();
-        
-        // Group by date and product name
+
         $logsByDate = [];
         foreach ($productionLogs as $log) {
-            // Normalize date to Y-m-d format
             $dateKey = Carbon::parse($log->log_date)->format('Y-m-d');
             $productName = strtoupper($log->eggProduct->name ?? '');
-            
             if (!isset($logsByDate[$dateKey])) {
                 $logsByDate[$dateKey] = [];
             }
@@ -62,48 +110,25 @@ class InventoryReportExport implements FromCollection, WithHeadings, WithCustomS
             }
             $logsByDate[$dateKey][$productName] += $log->quantity;
         }
-        
-        // Map product names to column names
-        $eggSizeMap = [
-            'PULLETS' => 'PULLETS',
-            'SMALL' => 'SMALL',
-            'MEDIUM' => 'MEDIUM',
-            'LARGE' => 'LARGE',
-            'X-LARGE' => 'X-LARGE',
-            'XL' => 'X-LARGE',
-            'JUMBO' => 'JUMBO',
-            'DAMAGED' => 'DAMAGED',
-            'BROKEN EGGS' => 'DAMAGED',
-        ];
-        
-        // Get current chicken stock as baseline
+
         $currentStock = FarmStat::where('stat_key', 'current_chicken_stock')->value('stat_value') ?? 0;
-        
-        // Get all chicken stock adjustments up to the end date
         $stockAdjustments = ChickenStockLog::whereDate('created_at', '<=', $endDate->endOfDay())
             ->orderBy('created_at', 'asc')
             ->get();
-        
-        // Generate all dates in the range
+
         $dates = [];
         $currentDate = $startDate->copy();
         while ($currentDate <= $endDate) {
             $dates[] = $currentDate->copy();
             $currentDate->addDay();
         }
-        
-        // Calculate stock count for each day
+
         $stockByDate = [];
         foreach ($dates as $date) {
             $dateKey = $date->format('Y-m-d');
-            
-            // Calculate stock for this date by working backwards from current stock
             $stockCount = $currentStock;
-            
             foreach ($stockAdjustments as $adjustment) {
                 $adjustmentDate = Carbon::parse($adjustment->created_at)->format('Y-m-d');
-                
-                // If adjustment is after this date, reverse it
                 if ($adjustmentDate > $dateKey) {
                     if ($adjustment->adjustment_type === 'addition') {
                         $stockCount -= $adjustment->quantity;
@@ -112,68 +137,38 @@ class InventoryReportExport implements FromCollection, WithHeadings, WithCustomS
                     }
                 }
             }
-            
-            // Ensure stock count is not negative
-            $stockCount = max(0, $stockCount);
-            $stockByDate[$dateKey] = $stockCount;
+            $stockByDate[$dateKey] = max(0, $stockCount);
         }
-        
-        // Build daily report
+
+        $totals = array_fill_keys($this->columnNames, 0);
         $dailyReport = collect([]);
-        $totals = [
-            'PULLETS' => 0,
-            'SMALL' => 0,
-            'MEDIUM' => 0,
-            'LARGE' => 0,
-            'X-LARGE' => 0,
-            'JUMBO' => 0,
-            'DAMAGED' => 0,
-        ];
-        
+
         foreach ($dates as $date) {
             $dateKey = $date->format('Y-m-d');
-            $dayNumber = $date->day;
-            
             $row = [
-                'day' => $dayNumber,
-                'hens' => $stockByDate[$dateKey] ?? $currentStock, // Use calculated stock count
-                'PULLETS' => 0,
-                'SMALL' => 0,
-                'MEDIUM' => 0,
-                'LARGE' => 0,
-                'X-LARGE' => 0,
-                'JUMBO' => 0,
-                'DAMAGED' => 0,
+                'day' => $date->day,
+                'hens' => $stockByDate[$dateKey] ?? $currentStock,
             ];
-            
-            // Get production for this date
+            foreach ($this->columnNames as $col) {
+                $row[$col] = 0;
+            }
             if (isset($logsByDate[$dateKey])) {
                 foreach ($logsByDate[$dateKey] as $productName => $quantity) {
-                    // Map product name to column
-                    $columnName = $eggSizeMap[$productName] ?? null;
-                    
-                    if ($columnName && isset($row[$columnName])) {
+                    $columnName = $this->eggSizeMap[$productName] ?? null;
+                    if ($columnName !== null && isset($row[$columnName])) {
                         $row[$columnName] = $quantity;
                         $totals[$columnName] += $quantity;
                     }
                 }
             }
-            
             $dailyReport->push($row);
         }
-        
-        // Add totals row
-        $dailyReport->push([
-            'day' => 'TOTAL',
-            'hens' => '', // Empty for totals row
-            'PULLETS' => $totals['PULLETS'],
-            'SMALL' => $totals['SMALL'],
-            'MEDIUM' => $totals['MEDIUM'],
-            'LARGE' => $totals['LARGE'],
-            'X-LARGE' => $totals['X-LARGE'],
-            'JUMBO' => $totals['JUMBO'],
-            'DAMAGED' => $totals['DAMAGED'],
-        ]);
+
+        $totalsRow = ['day' => 'TOTAL', 'hens' => ''];
+        foreach ($this->columnNames as $col) {
+            $totalsRow[$col] = $totals[$col] ?? 0;
+        }
+        $dailyReport->push($totalsRow);
 
         return $dailyReport;
     }
@@ -183,17 +178,8 @@ class InventoryReportExport implements FromCollection, WithHeadings, WithCustomS
      */
     public function headings(): array
     {
-        return [
-            'DAYS',
-            'HENS',
-            'PULLETS',
-            'SMALL',
-            'MEDIUM',
-            'LARGE',
-            'X-LARGE',
-            'JUMBO',
-            'DAMAGED',
-        ];
+        $this->buildMappings();
+        return array_merge(['DAYS', 'HENS'], $this->columnNames);
     }
 
     /**
@@ -202,45 +188,39 @@ class InventoryReportExport implements FromCollection, WithHeadings, WithCustomS
      */
     public function styles(Worksheet $sheet)
     {
+        $this->buildMappings();
         $monthYear = Carbon::parse($this->startDate)->format('F, Y');
-        
-        // Set header row 1
+        $lastColIndex = 2 + count($this->columnNames);
+        $lastColLetter = Coordinate::stringFromColumnIndex($lastColIndex);
+        $range4 = 'A4:' . $lastColLetter . '4';
+        $lastRow = $sheet->getHighestRow();
+        $totalRange = 'A' . $lastRow . ':' . $lastColLetter . $lastRow;
+
         $sheet->setCellValue('A1', strtoupper($monthYear));
-        $sheet->mergeCells('A1:I1');
+        $sheet->mergeCells('A1:' . $lastColLetter . '1');
         $sheet->getStyle('A1')->getFont()->setBold(true);
         $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
-        // Set header row 2
+
         $sheet->setCellValue('A2', 'EGG PRODUCTION (Grams)');
-        $sheet->mergeCells('A2:I2');
+        $sheet->mergeCells('A2:' . $lastColLetter . '2');
         $sheet->getStyle('A2')->getFont()->setBold(true);
         $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
-        // Set row 3 headers (HENS, 40-49, etc.)
+
         $sheet->setCellValue('B3', 'HENS');
-        $sheet->setCellValue('C3', '40-49');
-        $sheet->setCellValue('D3', '50-54');
-        $sheet->setCellValue('E3', '55-59');
-        $sheet->setCellValue('F3', '60-64');
-        $sheet->setCellValue('G3', '65-69');
-        $sheet->setCellValue('H3', '70 up');
-        $sheet->getStyle('B3:I3')->getFont()->setBold(true);
-        $sheet->getStyle('B3:I3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
-        // Style the column headers (row 4)
-        $sheet->getStyle('A4:I4')->getFont()->setBold(true);
-        $sheet->getStyle('A4:I4')->getFill()
+        $sheet->getStyle('A3:' . $lastColLetter . '3')->getFont()->setBold(true);
+        $sheet->getStyle('A3:' . $lastColLetter . '3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        $sheet->getStyle($range4)->getFont()->setBold(true);
+        $sheet->getStyle($range4)->getFill()
             ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setARGB('FFE0E0E0');
-        $sheet->getStyle('A4:I4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
-        // Style the TOTAL row
-        $lastRow = $sheet->getHighestRow();
-        $sheet->getStyle('A' . $lastRow . ':I' . $lastRow)->getFont()->setBold(true);
-        $sheet->getStyle('A' . $lastRow . ':I' . $lastRow)->getFill()
+        $sheet->getStyle($range4)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        $sheet->getStyle($totalRange)->getFont()->setBold(true);
+        $sheet->getStyle($totalRange)->getFill()
             ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setARGB('FFD3D3D3');
-        
+
         return [];
     }
 }

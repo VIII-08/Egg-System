@@ -33,62 +33,60 @@ except FileNotFoundError:
 df = df.rename(columns={'Date': 'ds', 'Quantity_Sold': 'y'})
 df['ds'] = pd.to_datetime(df['ds'], format='%d/%m/%Y')
 
-# Normalize egg size names: map variations to standard uppercase keys
-def normalize_egg_size(name):
-    """Normalize egg size names to standard uppercase format"""
-    name_upper = str(name).upper().strip()
-    
-    # Mapping variations to standard names
-    mapping = {
-        'XL': 'X-LARGE',
-        'X LARGE': 'X-LARGE',
-        'X-LARGE': 'X-LARGE',
-        'PULLETS': 'PULLETS',
-        'PULLET': 'PULLETS',
-        'SMALL': 'SMALL',
-        'MEDIUM': 'MEDIUM',
-        'LARGE': 'LARGE',
-        'JUMBO': 'JUMBO',
-        'PEWEE': 'PEWEE',
-    }
-    
-    # Try exact match first
-    if name_upper in mapping:
-        return mapping[name_upper]
-    
-    # Try partial match
-    for key, value in mapping.items():
-        if key in name_upper or name_upper in key:
-            return value
-    
-    # Return uppercase version if no mapping found
-    return name_upper
-
-# Get unique egg sizes from CSV and normalize them
-unique_sizes = df['Egg_Size'].unique()
-normalized_sizes = {}
-for size in unique_sizes:
-    normalized = normalize_egg_size(size)
-    if normalized not in normalized_sizes:
-        normalized_sizes[normalized] = size  # Store original for filtering
-
-# Exclude damaged eggs
-EGG_SIZES = [size for size in normalized_sizes.keys() 
-             if 'DAMAGED' not in size.upper() and 'DAMAGE' not in size.upper()]
+# Use product_id if present (so renames don't break forecast lookup); else group by Egg_Size (legacy)
+use_product_id = 'product_id' in df.columns
+if use_product_id:
+    # Key forecasts by product_id so renaming egg size in admin doesn't break the match
+    product_ids = [pid for pid in df['product_id'].unique() if pd.notna(pid)]
+    # Exclude damaged: drop rows where Egg_Size contains DAMAGED, then get unique product_ids
+    df_no_damaged = df[~df['Egg_Size'].astype(str).str.upper().str.contains('DAMAGED|DAMAGE', na=False)]
+    PRODUCT_KEYS = [str(pid) for pid in df_no_damaged['product_id'].unique() if pd.notna(pid)]
+    # For each product_id we need the display name (first Egg_Size for that id)
+    product_id_to_name = df_no_damaged.groupby('product_id')['Egg_Size'].first().to_dict()
+else:
+    # Legacy: group by Egg_Size
+    def normalize_egg_size(name):
+        name_upper = str(name).upper().strip()
+        mapping = {'XL': 'X-LARGE', 'X LARGE': 'X-LARGE', 'X-LARGE': 'X-LARGE', 'PULLETS': 'PULLETS',
+                   'PULLET': 'PULLETS', 'SMALL': 'SMALL', 'MEDIUM': 'MEDIUM', 'LARGE': 'LARGE',
+                   'JUMBO': 'JUMBO', 'PEWEE': 'PEWEE'}
+        if name_upper in mapping:
+            return mapping[name_upper]
+        for key, value in mapping.items():
+            if key in name_upper or name_upper in key:
+                return value
+        return name_upper
+    unique_sizes = df['Egg_Size'].unique()
+    normalized_sizes = {}
+    for size in unique_sizes:
+        normalized = normalize_egg_size(size)
+        if normalized not in normalized_sizes:
+            normalized_sizes[normalized] = size
+    EGG_SIZES = [s for s in normalized_sizes.keys() if 'DAMAGED' not in s.upper() and 'DAMAGE' not in s.upper()]
+    PRODUCT_KEYS = None  # use EGG_SIZES + normalized_sizes below
 
 all_forecasts = {}
 generated_at = datetime.utcnow().isoformat()
 
-# --- LOOP THROUGH EACH EGG SIZE ---
-for normalized_size in EGG_SIZES:
-    original_size = normalized_sizes[normalized_size]
-    print(f"\n--- Generating forecast for: {normalized_size} (from '{original_size}') ---")
-    
-    # Filter by original size name (case-sensitive match with CSV)
-    forecast_df = df[(df['Egg_Size'] == original_size)].copy()
+# --- LOOP: by product_id or by egg size ---
+if use_product_id:
+    iter_keys = PRODUCT_KEYS
+else:
+    iter_keys = EGG_SIZES
+
+for key in iter_keys:
+    if use_product_id:
+        forecast_df = df[df['product_id'].astype(str) == key].copy()
+        display_name = product_id_to_name.get(int(key), key)
+        print(f"\n--- Generating forecast for product_id={key} ({display_name}) ---")
+    else:
+        original_size = normalized_sizes[key]
+        forecast_df = df[(df['Egg_Size'] == original_size)].copy()
+        display_name = original_size
+        print(f"\n--- Generating forecast for: {key} (from '{original_size}') ---")
 
     if forecast_df.empty:
-        print(f"Warning: No historical data found for '{original_size}'. Skipping.")
+        print(f"Warning: No historical data found for '{display_name}'. Skipping.")
         continue
     
     # Initialize and train the model
@@ -117,8 +115,8 @@ for normalized_size in EGG_SIZES:
     # --- Extract the numerical forecast for tomorrow ---
     if not forecast_future.empty:
         tomorrow_forecast = forecast_future.iloc[0]
-    forecast_value = tomorrow_forecast['yhat']
-    rounded_forecast = round(forecast_value)
+        forecast_value = tomorrow_forecast['yhat']
+        rounded_forecast = round(forecast_value)
     else:
         # Fallback: use the last forecast value
         forecast_value = forecast.iloc[-1]['yhat']
@@ -127,11 +125,11 @@ for normalized_size in EGG_SIZES:
     print(f"Forecast for tomorrow: {round(forecast_value)} pcs")
 
     # --- Save the forecast plot with a unique name ---
-    plot_filename = f'forecast_plot_{normalized_size}.png'
+    plot_filename = f'forecast_plot_{key}.png'
     plot_filepath = os.path.join(output_plot_directory, plot_filename)
     
     fig = model.plot(forecast)
-    plt.title(f'Sales Forecast for {normalized_size} Eggs')
+    plt.title(f'Sales Forecast for {display_name} Eggs')
     plt.xlabel('Date')
     plt.ylabel('Quantity Sold')
     plt.savefig(plot_filepath)
@@ -163,7 +161,7 @@ for normalized_size in EGG_SIZES:
         mae = float(errors.abs().mean())
         rmse = float(math.sqrt((errors ** 2).mean()))
 
-    all_forecasts[normalized_size] = {
+    all_forecasts[key] = {
         'generated_at': generated_at,
         'history_last_date': forecast_df['ds'].max().strftime('%Y-%m-%d'),
         'plot': plot_filename,

@@ -24,9 +24,15 @@ const form = useForm({
 const profilePicturePreview = ref(null);
 const profilePictureFile = ref(null);
 
+// Password visibility toggles
+const showPassword = ref(false);
+const showConfirmPassword = ref(false);
+
 const openAddModal = () => {
     form.reset();
     isEditMode.value = false;
+    showPassword.value = false;
+    showConfirmPassword.value = false;
     showModal.value = true;
 };
 
@@ -45,6 +51,8 @@ const openEditModal = (user) => {
     profilePicturePreview.value = user.profile_picture 
         ? user.profile_picture 
         : `https://ui-avatars.com/api/?name=${user.name.replace(' ','+')}&background=random`;
+    showPassword.value = false;
+    showConfirmPassword.value = false;
     showModal.value = true;
 };
 
@@ -53,6 +61,8 @@ const closeModal = () => {
     form.reset(); 
     profilePicturePreview.value = null;
     profilePictureFile.value = null;
+    showPassword.value = false;
+    showConfirmPassword.value = false;
 };
 
 const handleProfilePictureChange = (event) => {
@@ -301,13 +311,29 @@ const getUserStatus = (user) => {
                                     {{ isEditMode ? 'New Password (optional)' : 'Password' }}
                                     <span v-if="!isEditMode" class="text-red-500">*</span>
                                 </label>
-                                <input 
-                                    v-model="form.password" 
-                                    type="password" 
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition"
-                                    :placeholder="isEditMode ? 'Leave blank to keep current' : 'Enter password'"
-                                    :required="!isEditMode"
-                                >
+                                <div class="relative">
+                                    <input 
+                                        v-model="form.password" 
+                                        :type="showPassword ? 'text' : 'password'" 
+                                        class="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition"
+                                        :placeholder="isEditMode ? 'Leave blank to keep current' : 'Enter password'"
+                                        :required="!isEditMode"
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="showPassword = !showPassword"
+                                        class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none"
+                                        tabindex="-1"
+                                    >
+                                        <svg v-if="!showPassword" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228L3 3m0 0a2 2 0 112.828 2.828M6.228 6.228L21.75 21.75" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
 
                             <!-- Confirm Password -->
@@ -316,13 +342,29 @@ const getUserStatus = (user) => {
                                     Confirm Password
                                     <span v-if="!isEditMode" class="text-red-500">*</span>
                                 </label>
-                                <input 
-                                    v-model="form.password_confirmation" 
-                                    type="password" 
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition"
-                                    :placeholder="isEditMode ? 'Confirm new password' : 'Re-enter password'"
-                                    :required="!isEditMode"
-                                >
+                                <div class="relative">
+                                    <input 
+                                        v-model="form.password_confirmation" 
+                                        :type="showConfirmPassword ? 'text' : 'password'" 
+                                        class="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition"
+                                        :placeholder="isEditMode ? 'Confirm new password' : 'Re-enter password'"
+                                        :required="!isEditMode"
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="showConfirmPassword = !showConfirmPassword"
+                                        class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none"
+                                        tabindex="-1"
+                                    >
+                                        <svg v-if="!showConfirmPassword" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228L3 3m0 0a2 2 0 112.828 2.828M6.228 6.228L21.75 21.75" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 

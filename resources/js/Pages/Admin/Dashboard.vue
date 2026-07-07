@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import BaseChart from '@/Components/BaseChart.vue';
 
 const props = defineProps({
@@ -123,7 +123,13 @@ const formatDate = (value) => {
                     <p class="text-xs text-gray-400 mt-1" v-else>No batches logged yet</p>
                 </button>
                 <div class="bg-white p-6 rounded-lg shadow"><h4 class="text-sm font-medium text-gray-500">Total Eggs in Stock</h4><p class="text-3xl font-bold text-green-600 mt-2">{{ totalEggsInStock?.toLocaleString() ?? 0 }} pcs</p></div>
-                <div class="bg-yellow-100 border border-yellow-300 p-6 rounded-lg shadow flex flex-col justify-center text-center"><h4 class="text-sm font-medium text-yellow-800">Pending Approvals</h4><p class="text-3xl font-bold text-yellow-900 mt-2">{{ pendingApprovalsCount }} Requests</p></div>
+                <Link
+                    :href="route('admin.approvals.index')"
+                    class="block bg-yellow-100 border border-yellow-300 p-6 rounded-lg shadow flex flex-col justify-center text-center transition hover:shadow-md hover:bg-yellow-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 cursor-pointer"
+                >
+                    <h4 class="text-sm font-medium text-yellow-800">Pending Approvals</h4>
+                    <p class="text-3xl font-bold text-yellow-900 mt-2">{{ pendingApprovalsCount }} Requests</p>
+                </Link>
             </div>
 
             <!-- Sales Performance Graph -->

@@ -483,18 +483,16 @@ class ReportController extends Controller
                          $row[$colName] = 0;
                      }
                      
-                     // Get production for this date
-                     if (isset($logsByDate[$dateKey])) {
-                         foreach ($logsByDate[$dateKey] as $productName => $quantity) {
-                             // Map product name to column
-                             $columnName = $eggSizeMap[$productName] ?? null;
-                             
-                             if ($columnName && isset($row[$columnName])) {
-                                 $row[$columnName] = $quantity;
-                                 $totals[$columnName] += $quantity;
-                             }
-                         }
-                     }
+                     // Get production for this date (only use column names we know exist to avoid undefined key after renames)
+                    if (isset($logsByDate[$dateKey])) {
+                        foreach ($logsByDate[$dateKey] as $productName => $quantity) {
+                            $columnName = $eggSizeMap[$productName] ?? null;
+                            if ($columnName !== null && isset($row[$columnName]) && array_key_exists($columnName, $totals)) {
+                                $row[$columnName] = $quantity;
+                                $totals[$columnName] += $quantity;
+                            }
+                        }
+                    }
                      
                      $dailyReport[] = $row;
                  }
@@ -505,14 +503,29 @@ class ReportController extends Controller
                      'date' => '',
                      'hens' => '', // Empty for totals row
                  ];
-                 foreach ($columnNames as $colName) {
-                     $totalsRow[$colName] = $totals[$colName] ?? 0;
-                 }
+                foreach ($columnNames as $colName) {
+                    $totalsRow[$colName] = array_key_exists($colName, $totals) ? $totals[$colName] : 0;
+                }
                  $dailyReport[] = $totalsRow;
-                 
+
+                 // Ensure every row has all possible size keys (including legacy names like JUMBO)
+                 // so cached/old compiled views never hit "Undefined array key" after renames
+                 $allPossibleColumns = array_unique(array_merge(
+                     $columnNames,
+                     ['PULLETS', 'SMALL', 'MEDIUM', 'LARGE', 'X-LARGE', 'JUMBO', 'DAMAGED']
+                 ));
+                 $dailyReport = array_map(function ($row) use ($allPossibleColumns) {
+                     foreach ($allPossibleColumns as $col) {
+                         if (!array_key_exists($col, $row)) {
+                             $row[$col] = ($row['day'] ?? '') === 'TOTAL' ? 0 : '';
+                         }
+                     }
+                     return $row;
+                 }, $dailyReport);
+
                  $data['items'] = $dailyReport;
                  $data['monthYear'] = $startDate->format('F, Y');
-                 $data['columnNames'] = $columnNames; // Send column names to frontend
+                 $data['columnNames'] = $columnNames;
                  break;
         }
         return $data;

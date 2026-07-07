@@ -31,9 +31,10 @@ class RunForecast extends Command
                 ->join('sale_items', 'sales_transactions.id', '=', 'sale_items.sales_transaction_id')
                 ->join('egg_products', 'sale_items.egg_product_id', '=', 'egg_products.id')
                 ->select(
+                    'egg_products.id as product_id',
                     'egg_products.name as Egg_Size',
-                    'sales_transactions.created_at as Date', 
-                    'sale_items.quantity as Quantity_Sold' 
+                    'sales_transactions.created_at as Date',
+                    'sale_items.quantity as Quantity_Sold'
                 )
                 ->orderBy('Date', 'asc')
                 ->get();
@@ -41,14 +42,14 @@ class RunForecast extends Command
             // Open file
             $file = fopen($csvPath, 'w');
             
-            // Add Header Row
-            fputcsv($file, ['Egg_Size', 'Date', 'Quantity_Sold']);
+            // Add Header Row (product_id so forecast stays correct after egg size renames)
+            fputcsv($file, ['product_id', 'Egg_Size', 'Date', 'Quantity_Sold']);
 
             // Add Data Rows
             $rowCount = 0;
             foreach ($sales as $row) {
                 $formattedDate = date('d/m/Y', strtotime($row->Date));
-                fputcsv($file, [$row->Egg_Size, $formattedDate, $row->Quantity_Sold]);
+                fputcsv($file, [$row->product_id, $row->Egg_Size, $formattedDate, $row->Quantity_Sold]);
                 $rowCount++;
             }
             

@@ -130,11 +130,11 @@ const formatDate = (dateString) => {
             <!-- Filters -->
             <div class="mb-6 p-4 bg-gray-50 rounded-lg">
                 <div class="flex items-center justify-between mb-3">
-                    <h3 class="font-semibold text-gray-700">Filters</h3>
+                    <h3 class="font-semibold text-white-700">Filters</h3>
                     <div class="flex items-center gap-3">
                         <button
                             @click="clearFilters"
-                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+                            class="px-4 py-2 bg-green-600 text-white-700 rounded-md hover:bg-gray-300 text-sm"
                         >
                             Clear Filters
                         </button>

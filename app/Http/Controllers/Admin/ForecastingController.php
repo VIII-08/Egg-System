@@ -43,7 +43,8 @@ class ForecastingController extends Controller
         }
         $forecastData = null;
         $prophetResults = $this->loadProphetResults();
-        $prophetRecord = $this->extractProphetRecord($selectedProduct->name, $prophetResults);
+        // Prefer lookup by product_id (survives egg size renames); fall back to name for old JSON
+        $prophetRecord = $prophetResults[(string) $productId] ?? $this->extractProphetRecord($selectedProduct->name, $prophetResults);
 
         // --- 2. Find the most recent date WITH A SALE for the selected product ---
         $latestSaleDate = SaleItem::query()
